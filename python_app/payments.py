@@ -7,6 +7,12 @@ import os
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Payments & Adjustments", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Data", style="Primary.TButton", command=lambda: fc.clear_cache()).pack(side="right")
+
     notebook = ttk.Notebook(frame)
     notebook.pack(fill="both", expand=True)
     
@@ -42,17 +48,18 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # TAB 1: Record Payment & Receipt Printing
 # ----------------------------------------------------
 def build_record_tab(tab, fc, utils, be, admin, main_frame):
-    f = ttk.Frame(tab, padding=10)
+    f = ttk.Frame(tab, padding=30)
     f.pack(fill="both", expand=True)
     
     # Left Form, Right Consumer Preview
     left_f = ttk.Frame(f)
-    left_f.grid(row=0, column=0, sticky="n", padx=5)
+    left_f.grid(row=0, column=0, sticky="n", padx=10)
     
-    right_f = ttk.LabelFrame(f, text="Consumer Balances Snapshot", padding=15)
-    right_f.grid(row=0, column=1, sticky="n", padx=15)
+    right_f = ttk.Frame(f, style="Card.TFrame", padding=25)
+    right_f.grid(row=0, column=1, sticky="n", padx=20)
+    ttk.Label(right_f, text="CONSUMER BALANCES", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 15))
     
-    ttk.Label(left_f, text="Enter Payment Receipt Details", font=("Segoe UI", 11, "bold"), foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+    ttk.Label(left_f, text="RECORD NEW PAYMENT", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 20))
     
     form_f = ttk.Frame(left_f)
     form_f.pack(fill="x")
@@ -108,7 +115,7 @@ def build_record_tab(tab, fc, utils, be, admin, main_frame):
     
     def refresh_cycles():
         def fetch():
-            return fc.list_billing_cycles()
+            return fc.list_billing_cycles(use_cache=True)
         def done(cycles):
             cycle_cb.config(values=[""] + [c["cycle_id"] for c in cycles])
         utils.run_in_thread(fetch, callback=done, widget=tab)
@@ -251,6 +258,7 @@ def build_record_tab(tab, fc, utils, be, admin, main_frame):
         }
         
         def save():
+            fc.clear_cache() # Invalidate cache on payment
             return fc.record_payment(payload, admin["name"])
             
         def done(payment_id):
@@ -536,16 +544,17 @@ def build_log_tab(tab, fc, utils, be, admin):
 # TAB 4: LPS Waiver Section
 # ----------------------------------------------------
 def build_waiver_tab(tab, fc, utils, be, admin):
-    ttk.Label(tab, text="Apply Late Payment Surcharge (LPS) Waiver", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
-    
-    f = ttk.Frame(tab, padding=10)
+    f = ttk.Frame(tab, padding=30)
     f.pack(fill="both", expand=True)
     
+    ttk.Label(f, text="LATE PAYMENT SURCHARGE (LPS) WAIVER", style="KPITitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 25))
+
     grid = ttk.Frame(f)
-    grid.grid(row=0, column=0, sticky="n", padx=5)
+    grid.grid(row=1, column=0, sticky="n", padx=10)
     
-    c_snap = ttk.LabelFrame(f, text="Consumer Details", padding=15)
-    c_snap.grid(row=0, column=1, sticky="n", padx=15)
+    c_snap = ttk.Frame(f, style="Card.TFrame", padding=25)
+    c_snap.grid(row=1, column=1, sticky="n", padx=20)
+    ttk.Label(c_snap, text="CONSUMER SNAPSHOT", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 15))
     
     target_c = [None]
     

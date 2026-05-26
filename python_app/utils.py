@@ -9,6 +9,35 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from weasyprint import HTML
 
+# Design Tokens (Claude Editorial Style)
+UI_COLORS = {
+    "primary": "#cc785c",
+    "primary_active": "#a9583e",
+    "primary_disabled": "#e6dfd8",
+    "ink": "#141413",
+    "body": "#3d3d3a",
+    "body_strong": "#252523",
+    "muted": "#6c6a64",
+    "muted_soft": "#8e8b82",
+    "hairline": "#e6dfd8",
+    "hairline_soft": "#ebe6df",
+    "canvas": "#faf9f5",
+    "surface_soft": "#f5f0e8",
+    "surface_card": "#efe9de",
+    "surface_cream_strong": "#e8e0d2",
+    "surface_dark": "#181715",
+    "surface_dark_elevated": "#252320",
+    "surface_dark_soft": "#1f1e1b",
+    "on_primary": "#ffffff",
+    "on_dark": "#faf9f5",
+    "on_dark_soft": "#a09d96",
+    "accent_teal": "#5db8a6",
+    "accent_amber": "#e8a55a",
+    "success": "#5db872",
+    "warning": "#d4a017",
+    "error": "#c64545",
+}
+
 # Constants
 CONSUMER_STATUS_OPTIONS = ["Active", "Inactive", "Meter Faulty", "Disconnected", "Disputed"]
 METER_SIZE_OPTIONS = ["15mm", "20mm", "25mm", "40mm", "50mm", "80mm", "100mm", "150mm"]
@@ -139,9 +168,9 @@ def run_in_thread(fn, *args, callback=None, error_callback=None, widget=None, **
         if not cb:
             return
         if widget:
-            if not widget_exists():
-                return
             try:
+                if not widget.winfo_exists():
+                    return
                 widget.after(0, lambda value=value: dispatch(cb, value))
             except Exception as schedule_error:
                 if not is_destroyed_widget_error(schedule_error):

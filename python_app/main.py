@@ -20,6 +20,7 @@ class AdminApp:
         self.root.title("Rajasthan Jal Board — Admin Console")
         self.root.geometry("1100x700")
         self.root.minsize(1000, 600)
+        self.root.withdraw() # Hide until authenticated
         
         # Apply Segoe UI font theme
         self.root.option_add("*Font", ("Segoe UI", 10))
@@ -27,12 +28,39 @@ class AdminApp:
         # Configure styles
         self.style = ttk.Style()
         self.style.theme_use("clam")
-        self.style.configure(".", font=("Segoe UI", 10))
-        self.style.configure("TLabel", font=("Segoe UI", 10))
-        self.style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
-        self.style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"), foreground="#1a3a6b")
-        self.style.configure("Sidebar.TButton", font=("Segoe UI", 10, "bold"), anchor="w", padding=6)
-        self.style.configure("Card.TFrame", background="#ffffff", borderwidth=1, relief="solid")
+
+        c = utils.UI_COLORS
+        self.root.configure(bg=c["canvas"])
+
+        self.style.configure(".", font=("Segoe UI", 10), background=c["canvas"], foreground=c["ink"])
+        self.style.configure("TFrame", background=c["canvas"])
+        self.style.configure("TLabel", font=("Segoe UI", 10), background=c["canvas"], foreground=c["ink"])
+
+        self.style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"), foreground=c["primary"])
+        self.style.configure("Title.TLabel", font=("Copernicus", 22), foreground=c["ink"]) # Tiempos/Copernicus feel
+
+        self.style.configure("Sidebar.TFrame", background=c["surface_dark"])
+        self.style.configure("Sidebar.TLabel", background=c["surface_dark"], foreground=c["on_dark"])
+        self.style.configure("Sidebar.TButton",
+            font=("Segoe UI", 10, "bold"),
+            anchor="w",
+            padding=10,
+            background=c["surface_dark"],
+            foreground=c["on_dark_soft"],
+            borderwidth=0
+        )
+        self.style.map("Sidebar.TButton",
+            background=[("active", c["surface_dark_elevated"]), ("pressed", c["surface_dark_soft"])],
+            foreground=[("active", c["on_dark"]), ("pressed", c["on_dark"])]
+        )
+
+        self.style.configure("Card.TFrame", background=c["surface_card"], borderwidth=1, relief="flat")
+        self.style.configure("KPI.TLabel", font=("Copernicus", 18, "bold"), background=c["surface_card"], foreground=c["primary"])
+        self.style.configure("KPITitle.TLabel", font=("Segoe UI", 9, "bold"), background=c["surface_card"], foreground=c["muted"])
+
+        self.style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=8)
+        self.style.configure("Primary.TButton", background=c["primary"], foreground=c["on_primary"])
+        self.style.map("Primary.TButton", background=[("active", c["primary_active"])])
         
         # Lockout tracking
         self.failed_attempts = 0
@@ -53,7 +81,8 @@ class AdminApp:
         if not os.path.exists(CREDENTIALS_FILE):
             self.show_setup_dialog()
         else:
-            self.show_login_dialog()
+            # Small delay to ensure root is withdrawn before dialog pops
+            self.root.after(100, self.show_login_dialog)
 
     def show_setup_dialog(self):
         setup_win = tk.Toplevel(self.root)
@@ -120,15 +149,18 @@ class AdminApp:
             self.show_login_dialog()
             
         ttk.Button(setup_win, text="Create Account", command=save_creds).pack(pady=15)
-        setup_win.protocol("WM_DELETE_WINDOW", lambda: self.root.quit())
+        setup_win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy())
 
     def show_login_dialog(self):
         login_win = tk.Toplevel(self.root)
         login_win.title("Admin Authenticate")
-        login_win.geometry("380x260")
+        login_win.geometry("400x350")
         login_win.resizable(False, False)
         login_win.grab_set()
         
+        c = utils.UI_COLORS
+        login_win.configure(bg=c["surface_dark"])
+
         # Center
         login_win.update_idletasks()
         w = login_win.winfo_width()
@@ -137,23 +169,22 @@ class AdminApp:
         y = (login_win.winfo_screenheight() // 2) - (h // 2)
         login_win.geometry(f"+{x}+{y}")
         
-        ttk.Label(login_win, text="Rajasthan Jal Board", font=("Segoe UI", 14, "bold"), foreground="#1a3a6b").pack(pady=10)
-        ttk.Label(login_win, text="Admin Console Login", font=("Segoe UI", 10, "italic"), foreground="#555").pack()
+        ttk.Label(login_win, text="RAJASTHAN JAL BOARD", font=("Copernicus", 16, "bold"), style="Sidebar.TLabel").pack(pady=(30, 5))
+        ttk.Label(login_win, text="Admin Console Login", font=("Segoe UI", 10), style="Sidebar.TLabel").pack(pady=(0, 20))
         
-        f = ttk.Frame(login_win)
-        f.pack(pady=15, padx=20)
+        f = ttk.Frame(login_win, style="Sidebar.TFrame")
+        f.pack(pady=10, padx=40, fill="x")
 
-        
-        ttk.Label(f, text="Username:").grid(row=0, column=0, sticky="w", pady=5)
-        user_ent = ttk.Entry(f, width=25)
-        user_ent.grid(row=0, column=1, pady=5)
+        ttk.Label(f, text="Username", style="Sidebar.TLabel").pack(anchor="w")
+        user_ent = ttk.Entry(f)
+        user_ent.pack(fill="x", pady=(5, 15))
         user_ent.focus()
         
-        ttk.Label(f, text="Password:").grid(row=1, column=0, sticky="w", pady=5)
-        pass_ent = ttk.Entry(f, show="*", width=25)
-        pass_ent.grid(row=1, column=1, pady=5)
+        ttk.Label(f, text="Password", style="Sidebar.TLabel").pack(anchor="w")
+        pass_ent = ttk.Entry(f, show="*")
+        pass_ent.pack(fill="x", pady=(5, 15))
         
-        status_lbl = ttk.Label(login_win, text="", foreground="red")
+        status_lbl = ttk.Label(login_win, text="", style="Sidebar.TLabel")
         status_lbl.pack()
         
         def attempt_login(event=None):
@@ -181,6 +212,7 @@ class AdminApp:
                     firebase_config.get_firebase_app()
                     
                     login_win.destroy()
+                    self.root.deiconify() # Show main window
                     self.build_main_interface()
                 except Exception as ex:
                     messagebox.showerror("Firebase Error", f"Failed to initialize Firebase Admin SDK:\n{ex}\n\nPlease place your 'serviceAccountKey.json' file in the directory.", parent=login_win)
@@ -194,39 +226,41 @@ class AdminApp:
                 else:
                     status_lbl.config(text=f"Invalid credentials. Attempt {self.failed_attempts}/5.")
         
-        btn = ttk.Button(login_win, text="Authenticate", command=attempt_login)
-        btn.pack(pady=10)
+        btn = ttk.Button(login_win, text="AUTHENTICATE", command=attempt_login, style="Primary.TButton")
+        btn.pack(pady=20, padx=40, fill="x")
         
         login_win.bind("<Return>", attempt_login)
-        login_win.protocol("WM_DELETE_WINDOW", lambda: self.root.quit())
+        login_win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy())
 
     def build_main_interface(self):
         # 1. Left Navigation Sidebar
-        self.sidebar_frame = ttk.Frame(self.root, padding=10, width=200, style="Sidebar.TFrame")
+        self.sidebar_frame = ttk.Frame(self.root, padding=0, width=220, style="Sidebar.TFrame")
         self.sidebar_frame.pack(side="left", fill="y")
         self.sidebar_frame.pack_propagate(False)
         
         # Logo and branding in Sidebar
-        logo_lbl = ttk.Label(self.sidebar_frame, text="💧 RJB Console", font=("Segoe UI", 12, "bold"), foreground="#1a3a6b", padding=10)
-        logo_lbl.pack(fill="x", pady=(0, 15))
+        c = utils.UI_COLORS
+        logo_lbl = ttk.Label(self.sidebar_frame, text="💧 RJB Console", font=("Segoe UI", 14, "bold"), style="Sidebar.TLabel", padding=20)
+        logo_lbl.pack(fill="x", pady=(10, 20))
         
         # Navigation Items mapping (Display Name, Emoji, Module name)
         self.menu_items = [
             ("Dashboard", "🏠", "dashboard"),
-            ("Consumers", "👥", "consumers"),
+            ("Consumers", "👤", "consumers"),
             ("Meter Readers", "👷", "meter_readers"),
             ("Billing Cycles", "💳", "billing"),
             ("Readings", "📖", "readings"),
             ("Payments", "💰", "payments"),
-            ("Reports", "📊", "reports"),
+            ("Reports", "📈", "reports"),
             ("Charges Config", "⚙️", "charges_config"),
-            ("Audit Log", "📋", "audit_log")
+            ("Audit Log", "📋", "audit_log"),
+            ("Dark Mode", "🌙", "dark_mode")
         ]
         
         for name, icon, mod in self.menu_items:
             btn = ttk.Button(
                 self.sidebar_frame, 
-                text=f"{icon}  {name}", 
+                text=f"  {icon}   {name.upper()}",
                 style="Sidebar.TButton",
                 command=lambda m=mod: self.show_page(m)
             )
@@ -238,19 +272,34 @@ class AdminApp:
         self.content_frame.pack(side="right", fill="both", expand=True)
         
         # 3. Status Bar at Bottom
-        self.status_bar = ttk.Frame(self.root, padding=3, borderwidth=1, relief="sunken")
+        self.status_bar = ttk.Frame(self.root, padding=5, style="Sidebar.TFrame")
         self.status_bar.pack(side="bottom", fill="x")
         
-        admin_lbl = ttk.Label(self.status_bar, text=f"Logged in as: {self.logged_in_admin}  |  Connected to Firebase", font=("Segoe UI", 8))
+        admin_lbl = ttk.Label(self.status_bar, text=f"Logged in as: {self.logged_in_admin}  |  Connected to Firebase", font=("Segoe UI", 8), style="Sidebar.TLabel")
         admin_lbl.pack(side="left", padx=10)
         
-        date_lbl = ttk.Label(self.status_bar, text=datetime.now().strftime("%d-%m-%Y  %H:%M"), font=("Segoe UI", 8))
+        date_lbl = ttk.Label(self.status_bar, text=datetime.now().strftime("%d-%m-%Y  %H:%M"), font=("Segoe UI", 8), style="Sidebar.TLabel")
         date_lbl.pack(side="right", padx=10)
         
+        # Set Sidebar selected look map
+        self.style.map("Sidebar.TButton",
+            background=[("pressed", c["primary"]), ("active", c["surface_dark_elevated"]), ("!disabled", c["surface_dark"])],
+            foreground=[("pressed", c["on_primary"]), ("active", c["on_dark"]), ("!disabled", c["on_dark_soft"])]
+        )
+
         # Default Page -> Dashboard
         self.show_page("dashboard")
 
+    def toggle_dark_mode(self):
+        # Placeholder for real theme switching logic
+        # For now we use the requested Claude theme which is already editorial
+        messagebox.showinfo("Theme", "System is already using the Editorial Claude Theme with warm canvas and dark-navy highlights.", parent=self.root)
+
     def show_page(self, page_name):
+        if page_name == "dark_mode":
+            self.toggle_dark_mode()
+            return
+
         # Update sidebar active highlighting
         for name, btn in self.nav_buttons.items():
             if name == page_name:
@@ -287,11 +336,11 @@ class AdminApp:
         
         # Title
         title_frame = ttk.Frame(frame)
-        title_frame.pack(fill="x", pady=(0, 15))
+        title_frame.pack(fill="x", pady=(10, 25))
         ttk.Label(title_frame, text="Rajasthan Jal Board Dashboard", style="Title.TLabel").pack(side="left")
         
         # Refresh button
-        ref_btn = ttk.Button(title_frame, text="🔄 Refresh Data", command=lambda: self.load_dashboard_data())
+        ref_btn = ttk.Button(title_frame, text="🔄 Refresh Dashboard", command=lambda: self.load_dashboard_data(use_cache=False), style="Primary.TButton")
         ref_btn.pack(side="right")
         
         # Cards frame
@@ -311,13 +360,13 @@ class AdminApp:
         ]
         
         for name, key, icon, r, c in kpis:
-            card = ttk.Frame(self.cards_frame, style="Card.TFrame", padding=15)
-            card.grid(row=r, column=c, sticky="nsew", padx=8, pady=8)
+            card = ttk.Frame(self.cards_frame, style="Card.TFrame", padding=20)
+            card.grid(row=r, column=c, sticky="nsew", padx=10, pady=10)
             self.cards_frame.grid_columnconfigure(c, weight=1)
             
-            ttk.Label(card, text=f"{icon}  {name}", font=("Segoe UI", 10, "bold"), foreground="#555").pack(anchor="w")
+            ttk.Label(card, text=f"{icon}  {name.upper()}", style="KPITitle.TLabel").pack(anchor="w")
             
-            val_lbl = ttk.Label(card, text="Loading...", font=("Segoe UI", 18, "bold"), foreground="#1a3a6b")
+            val_lbl = ttk.Label(card, text="Loading...", style="KPI.TLabel")
             val_lbl.pack(anchor="w", pady=(10, 0))
             self.kpi_labels[key] = val_lbl
             
@@ -327,22 +376,23 @@ class AdminApp:
         
         self.load_dashboard_data()
         
-        # Auto refresh loop (5 minutes)
-        self.root.after(300000, lambda: self.load_dashboard_data())
-        
         return frame
 
-    def load_dashboard_data(self):
+    def load_dashboard_data(self, use_cache=True):
         # Update to Loading state
         for lbl in self.kpi_labels.values():
-            lbl.config(text="Querying...")
+            if lbl.winfo_exists():
+                lbl.config(text="Querying...")
             
         def fetch_db_stats():
+            if not use_cache:
+                fc.clear_cache()
+
             # Consumers
-            active_c = len(fc.list_consumers({"is_active": True}))
+            active_c = len(fc.list_consumers({"is_active": True}, use_cache=use_cache))
             
             # Cycles & Readings
-            open_cycles = fc.get_open_cycles()
+            open_cycles = fc.get_open_cycles(use_cache=use_cache)
             open_cycles_str = ", ".join([f"Zones {c['zones']}" for c in open_cycles]) if open_cycles else "None"
             
             pending_readings = 0
@@ -375,12 +425,12 @@ class AdminApp:
             
             # Balances
             # Outstanding
-            all_consumers = fc.list_consumers()
+            all_consumers = fc.list_consumers(use_cache=use_cache)
             total_outstanding = sum(float(c.get("outstanding_balance", 0.0)) for c in all_consumers)
             
             # Payments this month
             today = date.today()
-            this_month_payments = fc.list_payments()
+            this_month_payments = fc.list_payments() # Payments not currently cached, might add if needed
             monthly_total = 0.0
             for p in this_month_payments:
                 p_date = utils.parse_date(p.get("payment_date", ""))
@@ -413,12 +463,14 @@ class AdminApp:
             q_lbl = self.kpi_labels["queries_val"]
             q_lbl.config(text=str(q_count))
             
+            c = utils.UI_COLORS
+
             # Clear alerts
             for widget in self.alert_frame.winfo_children():
                 widget.destroy()
                 
             if q_count > 0:
-                q_lbl.config(foreground="red")
+                q_lbl.config(foreground=c["error"])
                 # Show alert banner
                 banner = ttk.Frame(self.alert_frame, style="Card.TFrame", padding=10)
                 banner.pack(fill="x")
@@ -429,7 +481,7 @@ class AdminApp:
                 btn = ttk.Button(banner, text="Go to Readings Query Tab", command=lambda: self.show_page("readings"))
                 btn.pack(side="right")
             else:
-                q_lbl.config(foreground="#1a3a6b")
+                q_lbl.config(foreground=c["primary"])
                 
             self.kpi_labels["outstanding_val"].config(text=utils.format_currency(stats["outstanding"]))
             self.kpi_labels["collected_val"].config(text=utils.format_currency(stats["collected"]))

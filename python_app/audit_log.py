@@ -5,15 +5,17 @@ import json
 from datetime import datetime
 
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
-    frame = ttk.Frame(parent)
+    frame = ttk.Frame(parent, padding=30)
     
-    # Title
-    ttk.Label(frame, text="Security Audit Logs Explorer", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
-    ttk.Label(frame, text="Tracks administrative changes. Double-click a row to inspect full state changes (Old vs New values).").pack(anchor="w", pady=(0, 15))
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 30))
+    ttk.Label(header, text="SECURITY AUDIT TIMELINE", style="KPITitle.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Logs", style="Primary.TButton", command=lambda: refresh_logs()).pack(side="right")
     
     # Filters
-    f_frame = ttk.Frame(frame, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame = ttk.Frame(frame, style="Card.TFrame", padding=15)
+    f_frame.pack(fill="x", pady=(0, 20))
     
     ttk.Label(f_frame, text="Date From:").pack(side="left", padx=3)
     from_ent = ttk.Entry(f_frame, width=10)
@@ -77,6 +79,7 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
             filters["performed_by"] = adm_f
             
         def fetch():
+            fc.clear_cache() # Always fresh for audit
             return fc.get_audit_log(filters)
             
         def done(logs):
@@ -150,37 +153,39 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
             
         dlg = tk.Toplevel(frame)
         dlg.title(f"Log Inspection — {log_id}")
-        dlg.geometry("600x450")
+        dlg.geometry("800x600")
+        dlg.configure(bg="#F9F7F2")
         dlg.grab_set()
         
-        f = ttk.Frame(dlg, padding=15)
+        f = ttk.Frame(dlg, padding=30)
         f.pack(fill="both", expand=True)
         
-        ttk.Label(f, text=f"Audit Log ID: {log_id}", font=("Segoe UI", 11, "bold"), foreground="#1a3a6b").pack(anchor="w")
-        ttk.Label(f, text=f"Action: {l['action_type']} | Performed By: {l.get('performed_by_name')}").pack(anchor="w", pady=(0, 10))
+        ttk.Label(f, text=f"AUDIT LOG: {log_id}", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 5))
+        ttk.Label(f, text=f"{l['action_type']} performed by {l.get('performed_by_name')}", style="Muted.TLabel").pack(anchor="w", pady=(0, 25))
         
         # Grid for old vs new textboxes
         text_f = ttk.Frame(f)
-        text_f.pack(fill="both", expand=True, pady=10)
+        text_f.pack(fill="both", expand=True)
         
         text_f.grid_columnconfigure(0, weight=1)
         text_f.grid_columnconfigure(1, weight=1)
         text_f.grid_rowconfigure(1, weight=1)
         
-        ttk.Label(text_f, text="State BEFORE Change (Old Value)", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
-        old_txt = tk.Text(text_f, wrap="word", font=("Courier New", 9))
-        old_txt.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        old_txt.insert("1.0", json.dumps(l.get("old_value"), indent=2) if l.get("old_value") is not None else "None / Empty")
+        ttk.Label(text_f, text="PREVIOUS STATE", style="Muted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 10))
+        old_txt = tk.Text(text_f, wrap="word", font=("JetBrains Mono", 10), bg="#FFFFFF", fg="#2D3436", relief="flat", padx=10, pady=10)
+        old_txt.grid(row=1, column=0, sticky="nsew", padx=(0, 10), pady=5)
+        old_txt.insert("1.0", json.dumps(l.get("old_value"), indent=2) if l.get("old_value") is not None else "No previous record")
         old_txt.config(state="disabled")
         
-        ttk.Label(text_f, text="State AFTER Change (New Value)", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w")
-        new_txt = tk.Text(text_f, wrap="word", font=("Courier New", 9))
-        new_txt.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
-        new_txt.insert("1.0", json.dumps(l.get("new_value"), indent=2) if l.get("new_value") is not None else "None / Empty")
+        ttk.Label(text_f, text="NEW STATE", style="Muted.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 10))
+        new_txt = tk.Text(text_f, wrap="word", font=("JetBrains Mono", 10), bg="#FFFFFF", fg="#2D3436", relief="flat", padx=10, pady=10)
+        new_txt.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=5)
+        new_txt.insert("1.0", json.dumps(l.get("new_value"), indent=2) if l.get("new_value") is not None else "No new record")
         new_txt.config(state="disabled")
         
     tree.bind("<Double-1>", on_row_double_click)
     
-    # We do NOT run refresh_logs() initially (Firestore cost efficiency)
+    # Store handle
+    frame.refresh_logs = refresh_logs
     
     return frame

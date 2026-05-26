@@ -6,15 +6,24 @@ import string
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Meter Reader Management", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Readers", style="Primary.TButton", command=lambda: load_readers(use_cache=False)).pack(side="right")
+
+    content = ttk.Frame(frame)
+    content.pack(fill="both", expand=True)
+
     # Grid layout: Left 45% List, Right 55% Editor
-    frame.grid_columnconfigure(0, weight=4)
-    frame.grid_columnconfigure(1, weight=5)
-    frame.grid_rowconfigure(0, weight=1)
+    content.grid_columnconfigure(0, weight=4)
+    content.grid_columnconfigure(1, weight=5)
+    content.grid_rowconfigure(0, weight=1)
     
-    left_panel = ttk.Frame(frame, padding=10)
+    left_panel = ttk.Frame(content, padding=10)
     left_panel.grid(row=0, column=0, sticky="nsew")
     
-    right_panel = ttk.LabelFrame(frame, text="Reader Profile Editor", padding=15)
+    right_panel = ttk.Frame(content, style="Card.TFrame", padding=20)
     right_panel.grid(row=0, column=1, sticky="nsew", padx=15, pady=10)
     
     # Left Panel Elements
@@ -51,12 +60,12 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     # Editor fields
     fields = {}
     
-    def load_readers():
+    def load_readers(use_cache=True):
         for item in tree.get_children():
             tree.delete(item)
             
         def fetch():
-            return fc.list_meter_readers(active_filter_var.get())
+            return fc.list_meter_readers(active_filter_var.get(), use_cache=use_cache)
             
         def done(readers):
             nonlocal readers_list
@@ -72,10 +81,11 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     def clear_editor():
         current_selected_uid[0] = None
         for ent in fields.values():
-            if isinstance(ent, ttk.Entry):
-                ent.delete(0, "end")
-            elif isinstance(ent, ttk.Combobox):
-                ent.set("")
+            if not isinstance(ent, tk.BooleanVar):
+                if isinstance(ent, ttk.Entry):
+                    ent.delete(0, "end")
+                elif isinstance(ent, ttk.Combobox):
+                    ent.set("")
         # Disable editor inputs except New
         set_editor_state("disabled")
         deactivate_btn.config(state="disabled")
@@ -130,7 +140,8 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     tree.bind("<<TreeviewSelect>>", on_tree_select)
     
     # Build Editor Interface
-    row_idx = 0
+    ttk.Label(right_panel, text="READER PROFILE EDITOR", style="KPITitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 20))
+    row_idx = 1
     ttk.Label(right_panel, text="Name:*").grid(row=row_idx, column=0, sticky="w", pady=5)
     fields["name"] = ttk.Entry(right_panel, width=30)
     fields["name"].grid(row=row_idx, column=1, sticky="w", pady=5)

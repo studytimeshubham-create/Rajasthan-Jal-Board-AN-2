@@ -84,6 +84,9 @@
         </div>
       </div>
 
+      <!-- Extra info for Cashiers/Special categories -->
+      <div id="extra-info-container" class="info-panel" style="margin-top: 0; border-top: 1px dashed var(--border); display: none;"></div>
+
       <div class="balance-row" style="margin-bottom: 20px;">
         <div>
           <span class="info-label">Outstanding Balance</span>
@@ -244,6 +247,9 @@
       clearAlert();
       resultsPanel.style.display = "none";
       statusAlertContainer.innerHTML = "";
+      const extraInfoContainer = document.getElementById("extra-info-container");
+      extraInfoContainer.innerHTML = "";
+      extraInfoContainer.style.display = "none";
 
       const queryVal = searchQuery.value.trim().toUpperCase();
       if (!queryVal) {
@@ -294,7 +300,6 @@
         const isCashier = currentUserProfile && currentUserProfile.role === "Cashier";
         if (isCashier) {
             // Append extra data for cashiers
-            const infoPanel = document.querySelector(".info-panel");
             let extraData = `
                 <div>
                     <span class="info-label">Has Sewerage?</span>
@@ -325,7 +330,8 @@
                     `;
                 }
             }
-            infoPanel.insertAdjacentHTML('beforeend', extraData);
+            extraInfoContainer.innerHTML = extraData;
+            extraInfoContainer.style.display = "grid";
         }
 
         const addressText = [

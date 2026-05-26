@@ -11,6 +11,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Analytics & Reports", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh All Data", style="Primary.TButton", command=lambda: fc.clear_cache()).pack(side="right")
+
     notebook = ttk.Notebook(frame)
     notebook.pack(fill="both", expand=True)
     
@@ -187,10 +193,12 @@ def build_reader_activity_tab(tab, fc, utils, be, admin):
 # TAB 2: Consolidated Billing Summary & Matplotlib
 # ----------------------------------------------------
 def build_billing_summary_tab(tab, fc, utils, be, admin):
-    f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame = ttk.Frame(tab, padding=20)
+    f_frame.pack(fill="x")
+
+    ttk.Label(f_frame, text="BILLING PERFORMANCE ANALYTICS", style="KPITitle.TLabel").pack(side="left", padx=5)
     
-    ttk.Label(f_frame, text="Select Billing Cycle:").pack(side="left", padx=5)
+    ttk.Label(f_frame, text="Cycle:").pack(side="left", padx=(20, 5))
     cycle_var = tk.StringVar()
     cycle_cb = ttk.Combobox(f_frame, textvariable=cycle_var, width=18, state="readonly")
     cycle_cb.pack(side="left", padx=5)
@@ -198,7 +206,7 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
     # Load cycles
     def refresh_cycles():
         def fetch():
-            return fc.list_billing_cycles()
+            return fc.list_billing_cycles(use_cache=True)
         def done(cycles):
             cycle_cb.config(values=[c["cycle_id"] for c in cycles])
             if cycles:
@@ -218,13 +226,13 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
         ("Deficit Outstanding", "deficit_val", "#c0392b")
     ]
     for idx, (name, key, col) in enumerate(kpi_fields):
-        card = ttk.Frame(cards_frame, style="Card.TFrame", padding=10)
+        card = ttk.Frame(cards_frame, style="Card.TFrame", padding=20)
         card.grid(row=0, column=idx, sticky="ew", padx=10)
         cards_frame.grid_columnconfigure(idx, weight=1)
         
-        ttk.Label(card, text=name, font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        val_lbl = ttk.Label(card, text="₹0.00", font=("Segoe UI", 16, "bold"), foreground=col)
-        val_lbl.pack(anchor="w", pady=(5, 0))
+        ttk.Label(card, text=name, style="Muted.TLabel").pack(anchor="w")
+        val_lbl = ttk.Label(card, text="₹0.00", font=("Public Sans", 20, "bold"), foreground=col)
+        val_lbl.pack(anchor="w", pady=(8, 0))
         kpis[key] = val_lbl
         
     # Chart frame
@@ -254,7 +262,8 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
             if canvas_container[0]:
                 canvas_container[0].get_tk_widget().destroy()
                 
-            fig = Figure(figsize=(5, 3.2), dpi=100)
+            c_tokens = utils.UI_COLORS
+            fig = Figure(figsize=(5, 3.2), dpi=100, facecolor=c_tokens["canvas"])
             ax = fig.add_subplot(111)
             
             zones = [str(z["zone"]) for z in zones_data]
@@ -265,8 +274,8 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
             x = np.arange(len(zones))
             width = 0.35
             
-            ax.bar(x - width/2, billed, width, label="Billed (₹)", color="#1a3a6b")
-            ax.bar(x + width/2, collected, width, label="Collected (₹)", color="#2a7a2a")
+            ax.bar(x - width/2, billed, width, label="Billed (₹)", color=c_tokens["primary"])
+            ax.bar(x + width/2, collected, width, label="Collected (₹)", color=c_tokens["accent_teal"])
             
             ax.set_ylabel("Rupees (₹)")
             ax.set_title(f"Billing vs Collection per Zone (Cycle: {c_id})")
@@ -392,13 +401,16 @@ def build_zone_collection_tab(tab, fc, utils, be, admin):
 # TAB 4: Outstanding Balance Report
 # ----------------------------------------------------
 def build_outstanding_tab(tab, fc, utils, be, admin):
-    ttk.Label(tab, text="Defaulters List & Outstanding Balances", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+    f = ttk.Frame(tab, padding=20)
+    f.pack(fill="both", expand=True)
+
+    ttk.Label(f, text="DEFAULTERS & OUTSTANDING BALANCES", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 20))
     
-    btn_frame = ttk.Frame(tab)
+    btn_frame = ttk.Frame(f)
     btn_frame.pack(fill="x", pady=5)
     
     tree_columns = ("cin_no", "name", "zone", "category", "outstanding", "credit", "status")
-    tree = ttk.Treeview(tab, columns=tree_columns, show="headings")
+    tree = ttk.Treeview(f, columns=tree_columns, show="headings")
     tree.heading("cin_no", text="CIN")
     tree.heading("name", text="Consumer Name")
     tree.heading("zone", text="Zone")
@@ -415,7 +427,7 @@ def build_outstanding_tab(tab, fc, utils, be, admin):
     tree.column("credit", width=100, anchor="e")
     tree.column("status", width=80, anchor="center")
     
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+    scrollbar = ttk.Scrollbar(f, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
     tree.pack(side="top", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")

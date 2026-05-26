@@ -3,18 +3,24 @@ from tkinter import ttk, messagebox
 from datetime import datetime
 
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
-    frame = ttk.Frame(parent)
+    frame = ttk.Frame(parent, padding=30)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 30))
+    ttk.Label(header, text="TARIFF & RATE CONFIGURATION", style="KPITitle.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Rates", style="Primary.TButton", command=lambda: load_active_rates()).pack(side="right")
+
     # Grid layout: Top Rate Explorer, Bottom Sandbox Test Widget
     frame.grid_columnconfigure(0, weight=1)
     frame.grid_rowconfigure(0, weight=4) # Rates view
     frame.grid_rowconfigure(1, weight=3) # Sandbox test
     
-    rates_view_panel = ttk.LabelFrame(frame, text="Active Tariff Configuration", padding=10)
-    rates_view_panel.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+    rates_view_panel = ttk.Frame(frame, style="Card.TFrame", padding=20)
+    rates_view_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
     
-    sandbox_panel = ttk.LabelFrame(frame, text="Live Bill Test Sandbox", padding=10)
-    sandbox_panel.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+    sandbox_panel = ttk.Frame(frame, style="Card.TFrame", padding=20)
+    sandbox_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
     active_rates = [None] # Local rates cache
     
@@ -40,12 +46,12 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
         
         # Helper to format groups
         def print_title(title):
-            rates_text.insert("end", f"\n=== {title} ===\n", "title")
+            rates_text.insert("end", f"\n{title.upper()}\n", "title")
             
         def print_rate(name, val):
-            rates_text.insert("end", f"  • {name:<35}: {val}\n")
+            rates_text.insert("end", f"  {name:<35} : {val}\n")
             
-        rates_text.tag_config("title", font=("Segoe UI", 10, "bold"), foreground="#1a3a6b")
+        rates_text.tag_config("title", font=("Public Sans", 11, "bold"), foreground="#1a3a6b")
         
         print_title("Domestic (15mm–25mm) Slabs")
         print_rate("Slab 0-8 KL (Domestic)", f"₹{rates.get('domestic_slab_a_rate', 7.00):.2f} / KL")
@@ -136,13 +142,14 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
             
         dlg = tk.Toplevel(frame)
         dlg.title("Edit Slabs Config & Rates")
-        dlg.geometry("450x550")
+        dlg.geometry("600x700")
+        dlg.configure(bg="#F9F7F2")
         dlg.grab_set()
         
         # Scrollable form inside popups
-        canvas = tk.Canvas(dlg)
+        canvas = tk.Canvas(dlg, bg="#F9F7F2", highlightthickness=0)
         scrollbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
-        scroll_frame = ttk.Frame(canvas)
+        scroll_frame = ttk.Frame(canvas, padding=30)
         
         scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
@@ -398,7 +405,9 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
             "meter_size": size,
             "consumer_status": "Active",
             "outstanding_balance": 100.0 if delay > 0 else 0.0,
-            "credit_balance": 0.0
+            "credit_balance": 0.0,
+            "sewerage_connection": "PHED Supply", # default for sandbox
+            "sewerage_sub_category": "Domestic"
         }
         
         from datetime import timedelta

@@ -6,6 +6,12 @@ import os
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Billing Cycles", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Cycles", style="Primary.TButton", command=lambda: build_active_tab(active_tab, fc, utils, be, admin, refresh=True)).pack(side="right")
+
     notebook = ttk.Notebook(frame)
     notebook.pack(fill="both", expand=True)
     
@@ -36,11 +42,14 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # ----------------------------------------------------
 # TAB 1: Active Cycles
 # ----------------------------------------------------
-def build_active_tab(tab, fc, utils, be, admin):
+def build_active_tab(tab, fc, utils, be, admin, refresh=False):
     for w in tab.winfo_children():
         w.destroy()
-        
-    ttk.Label(tab, text="Open Billing Cycles", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+
+    if refresh:
+        fc.clear_cache("open_cycles")
+
+    ttk.Label(tab, text="Open Billing Cycles", style="Header.TLabel", foreground=utils.UI_COLORS["primary"]).pack(anchor="w", pady=(0, 10))
     
     tree_columns = ("cycle_id", "zones", "start_date", "end_date", "last_pay", "progress", "skipped")
     tree = ttk.Treeview(tab, columns=tree_columns, show="headings", height=6)
@@ -196,14 +205,14 @@ def build_active_tab(tab, fc, utils, be, admin):
 # TAB 2: Initiate New Cycle
 # ----------------------------------------------------
 def build_initiate_tab(tab, fc, utils, be, admin, notebook, active_tab, print_tab):
-    f = ttk.Frame(tab, padding=10)
+    f = ttk.Frame(tab, padding=30)
     f.pack(fill="both", expand=True)
     
-    ttk.Label(f, text="Initiate New Billing Cycle", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 15))
+    ttk.Label(f, text="INITIATE NEW BILLING CYCLE", style="KPITitle.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 25))
     
     # Zone selector Frame
-    ttk.Label(f, text="Select Zone(s):*").grid(row=1, column=0, sticky="nw", pady=5)
-    zone_frame = ttk.LabelFrame(f, text="Select Zones 1-20 (Conflicts disabled)", padding=10)
+    ttk.Label(f, text="Select Zone(s)*", font=("Segoe UI", 10, "bold")).grid(row=1, column=0, sticky="nw", pady=5)
+    zone_frame = ttk.Frame(f, style="Card.TFrame", padding=15)
     zone_frame.grid(row=1, column=1, sticky="w", pady=5)
     
     zone_vars = {}
@@ -238,8 +247,9 @@ def build_initiate_tab(tab, fc, utils, be, admin, notebook, active_tab, print_ta
     ttk.Radiobutton(grace_f, text="2 Months", variable=grace_var, value=2).pack(side="left", padx=5)
     
     # Preview Frame
-    prev_frame = ttk.LabelFrame(f, text="Live Cycle Preview", padding=10)
-    prev_frame.grid(row=5, column=1, sticky="w", pady=15)
+    prev_frame = ttk.Frame(f, style="Card.TFrame", padding=20)
+    prev_frame.grid(row=5, column=1, sticky="w", pady=25)
+    ttk.Label(prev_frame, text="LIVE CYCLE PREVIEW", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 10))
     
     c_count_lbl = ttk.Label(prev_frame, text="Consumers selected: 0", font=("Segoe UI", 9, "bold"))
     c_count_lbl.pack(anchor="w")
@@ -365,7 +375,7 @@ def build_initiate_tab(tab, fc, utils, be, admin, notebook, active_tab, print_ta
             
         utils.run_in_thread(run, callback=done, error_callback=fail, widget=tab)
 
-    ttk.Button(f, text="💳 Initiate Cycle", command=initiate_cycle).grid(row=6, column=1, sticky="w", pady=10)
+    ttk.Button(f, text="💳 INITIATE BILLING CYCLE", command=initiate_cycle, style="Primary.TButton").grid(row=6, column=1, sticky="w", pady=10)
     
     # Store refresh
     tab.on_cycles_changed = refresh_locked_zones

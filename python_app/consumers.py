@@ -7,12 +7,18 @@ from datetime import datetime
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Consumer Management", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Consumers", style="Primary.TButton", command=lambda: build_search_tab(search_tab, fc, utils, be, admin, refresh=True)).pack(side="right")
+
     # Notebook for tabs
     notebook = ttk.Notebook(frame)
     notebook.pack(fill="both", expand=True)
     
     # Tab 1: Search / View Consumers
-    search_tab = ttk.Frame(notebook, padding=10)
+    search_tab = ttk.Frame(notebook, padding=20)
     notebook.add(search_tab, text="🔍 Search / View")
     build_search_tab(search_tab, fc, utils, be, admin)
     
@@ -41,10 +47,11 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # ----------------------------------------------------
 # TAB 1: Search & View
 # ----------------------------------------------------
-def build_search_tab(tab, fc, utils, be, admin):
+def build_search_tab(tab, fc, utils, be, admin, refresh=False):
+    for w in tab.winfo_children(): w.destroy()
     # Top Search Bar
-    s_frame = ttk.Frame(tab, padding=5)
-    s_frame.pack(fill="x", pady=(0, 10))
+    s_frame = ttk.Frame(tab, padding=10)
+    s_frame.pack(fill="x", pady=(0, 20))
     
     ttk.Label(s_frame, text="Search Query (CIN or Meter Serial):").pack(side="left", padx=5)
     search_ent = ttk.Entry(s_frame, width=30)
@@ -79,7 +86,7 @@ def build_search_tab(tab, fc, utils, be, admin):
             if status_f != "All":
                 filters["status"] = status_f
                 
-            consumers = fc.list_consumers(filters)
+            consumers = fc.list_consumers(filters, use_cache=not refresh)
             
             # Local client-side text filtering if query set
             if query:
@@ -106,7 +113,7 @@ def build_search_tab(tab, fc, utils, be, admin):
     search_btn.pack(side="left", padx=10)
     
     # Treeview container
-    t_frame = ttk.Frame(tab)
+    t_frame = ttk.Frame(tab, style="Card.TFrame", padding=1)
     t_frame.pack(fill="both", expand=True)
     
     tree = ttk.Treeview(t_frame, columns=tree_columns, show="headings")
@@ -196,38 +203,38 @@ def build_profile_view(tab, c, fc, utils, be, admin, popup, refresh_callback, re
         w.destroy()
         
     f = ttk.Frame(tab)
-    f.pack(fill="both", expand=True)
+    f.pack(fill="both", expand=True, padx=20, pady=20)
     
     # 2-column key-value grid for details
-    grid = ttk.Frame(f)
+    grid = ttk.Frame(f, style="Card.TFrame", padding=20)
     grid.pack(fill="x", pady=10)
     
     details = [
-        ("CIN Number:", c["cin_no"], 0, 0),
-        ("Consumer Name:", c["name"], 0, 1),
-        ("Zone Number:", c["zone"], 1, 0),
-        ("Billing Category:", c["category"], 1, 1),
-        ("Meter Size:", c["meter_size"], 2, 0),
-        ("Meter Serial No:", c.get("meter_serial_no", ""), 2, 1),
-        ("Contact Number:", c.get("contact_number") or "", 3, 0),
-        ("Aadhaar/PHED No:", c.get("aadhaar_phed_no") or "", 3, 1),
-        ("Status:", c.get("consumer_status", "Active"), 4, 0),
-        ("Is Active:", "Yes" if c.get("is_active", True) else "No", 4, 1),
-        ("Outstanding Balance:", utils.format_currency(c.get("outstanding_balance", 0.0)), 5, 0),
-        ("Credit Balance:", utils.format_currency(c.get("credit_balance", 0.0)), 5, 1),
-        ("Initial Meter Reading:", f"{c.get('initial_meter_reading', 0.0):.2f} KL", 6, 0),
-        ("Last Verified Reading:", f"{c.get('last_reading', 0.0):.2f} KL", 6, 1),
-        ("GPS Coordinates:", f"{c.get('address_latitude','')}, {c.get('address_longitude','')}", 7, 0),
-        ("PIN Code:", c.get("address_pin_code") or "", 7, 1),
-        ("Area/Location:", c.get("address_area_location") or "", 8, 0),
-        ("Landmark:", c.get("address_landmark") or "", 8, 1)
+        ("CIN Number", c["cin_no"], 0, 0),
+        ("Consumer Name", c["name"], 0, 1),
+        ("Zone Number", c["zone"], 1, 0),
+        ("Billing Category", c["category"], 1, 1),
+        ("Meter Size", c["meter_size"], 2, 0),
+        ("Meter Serial No", c.get("meter_serial_no", ""), 2, 1),
+        ("Contact Number", c.get("contact_number") or "", 3, 0),
+        ("Aadhaar/PHED No", c.get("aadhaar_phed_no") or "", 3, 1),
+        ("Status", c.get("consumer_status", "Active"), 4, 0),
+        ("Is Active", "Yes" if c.get("is_active", True) else "No", 4, 1),
+        ("Outstanding", utils.format_currency(c.get("outstanding_balance", 0.0)), 5, 0),
+        ("Credit Balance", utils.format_currency(c.get("credit_balance", 0.0)), 5, 1),
+        ("Initial Reading", f"{c.get('initial_meter_reading', 0.0):.2f} KL", 6, 0),
+        ("Last Reading", f"{c.get('last_reading', 0.0):.2f} KL", 6, 1),
+        ("Coordinates", f"{c.get('address_latitude','')}, {c.get('address_longitude','')}", 7, 0),
+        ("PIN Code", c.get("address_pin_code") or "", 7, 1),
+        ("Area/Location", c.get("address_area_location") or "", 8, 0),
+        ("Landmark", c.get("address_landmark") or "", 8, 1)
     ]
     
     for lbl, val, row, col in details:
-        lbl_w = ttk.Label(grid, text=lbl, font=("Segoe UI", 9, "bold"))
-        lbl_w.grid(row=row, column=col*2, sticky="w", padx=10, pady=3)
-        val_w = ttk.Label(grid, text=str(val))
-        val_w.grid(row=row, column=col*2+1, sticky="w", padx=10, pady=3)
+        lbl_w = ttk.Label(grid, text=lbl.upper(), style="KPITitle.TLabel")
+        lbl_w.grid(row=row*2, column=col, sticky="w", padx=15, pady=(5, 0))
+        val_w = ttk.Label(grid, text=str(val), font=("Segoe UI", 10, "bold"))
+        val_w.grid(row=row*2+1, column=col, sticky="w", padx=15, pady=(0, 5))
         
     # Custom Attributes list inside Profile
     attrs = c.get("custom_attributes", {})
@@ -450,10 +457,10 @@ def build_add_tab(tab, fc, utils, be, admin, notebook):
     scrollbar.pack(side="right", fill="y")
     
     # Form layout
-    f = ttk.Frame(scroll_frame, padding=10)
+    f = ttk.Frame(scroll_frame, padding=20)
     f.pack(fill="both", expand=True)
     
-    ttk.Label(f, text="Register New Consumer Profile", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 15))
+    ttk.Label(f, text="Register New Consumer Profile", style="Header.TLabel", foreground=utils.UI_COLORS["primary"]).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 25))
     
     fields = {}
     
@@ -711,7 +718,7 @@ def show_edit_consumer_dialog(c, fc, utils, admin, parent_popup, success_callbac
     f = ttk.Frame(edit_win, padding=15)
     f.pack(fill="both", expand=True)
     
-    ttk.Label(f, text=f"Update Profile for {c['cin_no']}", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 15))
+    ttk.Label(f, text=f"Update Profile for {c['cin_no']}", style="Header.TLabel", foreground=utils.UI_COLORS["primary"]).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 15))
     
     fields = {}
     
@@ -1096,10 +1103,11 @@ def build_replacement_tab(tab, fc, utils, be, admin):
     
     # Left search area, Right update form
     lf = ttk.Frame(tab)
-    lf.grid(row=1, column=0, sticky="n", padx=5)
+    lf.grid(row=1, column=0, sticky="n", padx=10)
     
-    rf = ttk.LabelFrame(tab, text="Enter Replacement Log Details", padding=15)
-    rf.grid(row=1, column=1, sticky="n", padx=15)
+    rf = ttk.Frame(tab, style="Card.TFrame", padding=30)
+    rf.grid(row=1, column=1, sticky="n", padx=20)
+    ttk.Label(rf, text="REPLACEMENT DETAILS", style="KPITitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 20))
     
     # Search elements
     ttk.Label(lf, text="Search Consumer (CIN):").pack(anchor="w")
@@ -1139,8 +1147,8 @@ def build_replacement_tab(tab, fc, utils, be, admin):
     ttk.Button(lf, text="🔍 Search Profile", command=search_consumer).pack(anchor="w", pady=5)
     
     # Display info
-    info_box = ttk.LabelFrame(lf, text="Target Consumer", padding=10)
-    info_box.pack(anchor="w", fill="x", pady=10)
+    info_box = ttk.Frame(lf, style="Card.TFrame", padding=15)
+    info_box.pack(anchor="w", fill="x", pady=15)
     
     ttk.Label(info_box, text="Name:").grid(row=0, column=0, sticky="w", pady=2)
     ttk.Label(info_box, textvariable=consumer_name_var, font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w", pady=2, padx=5)

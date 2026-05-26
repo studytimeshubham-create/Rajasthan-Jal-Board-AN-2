@@ -6,6 +6,12 @@ from datetime import datetime
 def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     frame = ttk.Frame(parent)
     
+    # Title and Refresh row
+    header = ttk.Frame(frame)
+    header.pack(fill="x", pady=(0, 20))
+    ttk.Label(header, text="Meter Readings & Queries", style="Title.TLabel").pack(side="left")
+    ttk.Button(header, text="🔄 Refresh Readings", style="Primary.TButton", command=lambda: view_tab.perform_search(refresh=True)).pack(side="right")
+
     notebook = ttk.Notebook(frame)
     notebook.pack(fill="both", expand=True)
     
@@ -88,7 +94,7 @@ def build_view_tab(tab, fc, utils, be, admin):
         
     refresh_cycles_filter()
     
-    def perform_search():
+    def perform_search(refresh=False):
         for r in tree.get_children():
             tree.delete(r)
             
@@ -100,7 +106,7 @@ def build_view_tab(tab, fc, utils, be, admin):
             # Firestore query limitations: we fetch readings and evaluate local filters
             # if cycle is selected, filter by cycle to minimize reads
             cycle_id = c_filter if c_filter != "All" else ""
-            readings = fc.get_readings_for_cycle(cycle_id)
+            readings = fc.get_readings_for_cycle(cycle_id, use_cache=not refresh)
             return readings
             
         def done(readings):
@@ -253,6 +259,7 @@ def build_view_tab(tab, fc, utils, be, admin):
         show_reading_detail_popup(reading_id, fc, utils, be, admin, tab, perform_search)
         
     tree.bind("<Double-1>", on_row_double_click)
+    tab.perform_search = perform_search
 
 def show_reading_detail_popup(reading_id, fc, utils, be, admin, parent, refresh_callback):
     popup = tk.Toplevel(parent)

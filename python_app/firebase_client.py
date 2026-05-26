@@ -7,6 +7,16 @@ from firebase_admin import firestore, auth
 firebase_config.get_firebase_app()
 db = firestore.client()
 
+# Data Cache
+_cache = {}
+
+def clear_cache(key: str = None):
+    global _cache
+    if key:
+        if key in _cache: del _cache[key]
+    else:
+        _cache.clear()
+
 # Firestore's modern Python client expects a FieldFilter object for keyword
 # filters. Passing a list of tuples raises ValueError on newer releases.
 def _where_eq(query, field: str, value):
@@ -167,8 +177,12 @@ def bulk_create_consumers(data_list: list, admin_name: str) -> dict:
             
     return {"success": success_count, "errors": errors}
 
-def list_consumers(filters: dict = None) -> list:
+def list_consumers(filters: dict = None, use_cache: bool = True) -> list:
     """Lists consumers from Firestore with optional filtering by zone, status, or is_active."""
+    cache_key = f"consumers_{filters}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = db.collection("consumers")
     
     if filters:
@@ -185,6 +199,8 @@ def list_consumers(filters: dict = None) -> list:
         data = doc.to_dict()
         data["cin_no"] = doc.id
         results.append(data)
+
+    _cache[cache_key] = results
     return results
 
 # ----------------------------------------------------
@@ -239,14 +255,20 @@ def get_billing_cycle(cycle_id: str) -> dict | None:
         return data
     return None
 
-def get_open_cycles() -> list:
+def get_open_cycles(use_cache: bool = True) -> list:
     """Fetches all open billing cycles."""
+    cache_key = "open_cycles"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = _where_eq(db.collection("billing_cycles"), "status", "open").get()
     results = []
     for doc in query:
         data = doc.to_dict()
         data["cycle_id"] = doc.id
         results.append(data)
+
+    _cache[cache_key] = results
     return results
 
 def get_open_cycle_zones() -> list:
@@ -274,8 +296,12 @@ def close_billing_cycle(cycle_id: str, admin_name: str) -> None:
     doc_ref.update(updates)
     write_audit_log("CLOSE_BILLING_CYCLE", admin_name, f"billing_cycles/{cycle_id}", old_data, updates)
 
-def list_billing_cycles(status: str = None) -> list:
+def list_billing_cycles(status: str = None, use_cache: bool = True) -> list:
     """Lists all billing cycles, optionally filtering by status (open/closed)."""
+    cache_key = f"billing_cycles_{status}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = db.collection("billing_cycles")
     if status:
         query = _where_eq(query, "status", status)
@@ -288,6 +314,7 @@ def list_billing_cycles(status: str = None) -> list:
         results.append(data)
     # Sort by initiated_at desc
     results.sort(key=lambda x: x.get("initiated_at") or 0, reverse=True)
+    _cache[cache_key] = results
     return results
 
 # ----------------------------------------------------
@@ -302,8 +329,12 @@ def get_reading(reading_id: str) -> dict | None:
         return data
     return None
 
-def get_readings_for_cycle(cycle_id: str, cin_no: str = None) -> list:
+def get_readings_for_cycle(cycle_id: str, cin_no: str = None, use_cache: bool = True) -> list:
     """Retrieves readings submitted under a specific cycle."""
+    cache_key = f"readings_{cycle_id}_{cin_no}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = _where_eq(db.collection("readings"), "cycle_id", cycle_id)
     if cin_no:
         query = _where_eq(query, "cin_no", cin_no)
@@ -314,6 +345,8 @@ def get_readings_for_cycle(cycle_id: str, cin_no: str = None) -> list:
         data = doc.to_dict()
         data["reading_id"] = doc.id
         results.append(data)
+
+    _cache[cache_key] = results
     return results
 
 def admin_update_reading(reading_id: str, updates: dict, admin_name: str) -> None:
@@ -589,8 +622,12 @@ def get_payments_for_consumer(cin_no: str, cycle_id: str = None) -> list:
     results.sort(key=lambda x: parse_date(x.get("payment_date")), reverse=True)
     return results
 
-def list_payments(filters: dict = None) -> list:
+def list_payments(filters: dict = None, use_cache: bool = True) -> list:
     """Lists payments, supporting filters by consumer, date range, mode, or cycle."""
+    cache_key = f"payments_{filters}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = db.collection("payments")
     if filters:
         if "cin_no" in filters and filters["cin_no"]:
@@ -618,7 +655,8 @@ def list_payments(filters: dict = None) -> list:
             if d_from <= p_date <= d_to:
                 filtered.append(p)
         results = filtered
-        
+
+    _cache[cache_key] = results
     return results
 
 def update_consumer_lps_waiver(cin_no: str, waiver_amount: float, reason_note: str, admin_name: str) -> None:
@@ -757,8 +795,12 @@ DEFAULT_CHARGES_CONFIG = {
     "stp_charge_rate_pct": 13.0,
 }
 
-def get_charges_config() -> dict:
+def get_charges_config(use_cache: bool = True) -> dict:
     """Fetches the active water charges configurations."""
+    cache_key = "charges_config"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     doc_ref = db.collection("charges_config").document("current")
     doc = doc_ref.get()
     if doc.exists:
@@ -767,6 +809,7 @@ def get_charges_config() -> dict:
         if missing_defaults:
             doc_ref.update(missing_defaults)
             rates.update(missing_defaults)
+        _cache[cache_key] = rates
         return rates
         
     # Baseline values for 2025 as fallback if config doesn't exist
@@ -778,6 +821,7 @@ def get_charges_config() -> dict:
     
     # Initialize baseline
     doc_ref.set(baseline)
+    _cache[cache_key] = baseline
     return baseline
 
 def update_charges_config(new_rates: dict, admin_name: str, note: str) -> None:
@@ -875,8 +919,12 @@ def get_meter_reader(uid: str) -> dict | None:
         return data
     return None
 
-def list_meter_readers(active_only: bool = False) -> list:
+def list_meter_readers(active_only: bool = False, use_cache: bool = True) -> list:
     """Lists all meter readers with status filtering."""
+    cache_key = f"meter_readers_{active_only}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = db.collection("meter_readers")
     if active_only:
         query = _where_eq(query, "is_active", True)
@@ -887,6 +935,8 @@ def list_meter_readers(active_only: bool = False) -> list:
         data = doc.to_dict()
         data["uid"] = doc.id
         results.append(data)
+
+    _cache[cache_key] = results
     return results
 
 def update_meter_reader(uid: str, updates: dict, admin_name: str) -> None:
@@ -1043,8 +1093,12 @@ def get_meter_replacement_history(cin_no: str) -> list:
 # ----------------------------------------------------
 # Audit + Report Functions
 # ----------------------------------------------------
-def get_audit_log(filters: dict = None) -> list:
+def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
     """Retrieves records from audit logs."""
+    cache_key = f"audit_log_{filters}"
+    if use_cache and cache_key in _cache:
+        return _cache[cache_key]
+
     query = db.collection("audit_log")
     
     if filters:
@@ -1091,6 +1145,7 @@ def get_audit_log(filters: dict = None) -> list:
         return datetime.fromisoformat(ts)
         
     results.sort(key=get_time, reverse=True)
+    _cache[cache_key] = results
     return results
 
 def get_meter_reader_activity(date_from, date_to, reader_uid=None, zone=None) -> list:
