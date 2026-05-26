@@ -165,7 +165,7 @@
   <script type="module">
     import { auth, db } from "./firebase_config.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-    import { doc, getDoc, getDocs, collection, query, where, writeBatch, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+    import { doc, getDoc, getDocs, collection, query, where, runTransaction, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
     import calculateBill, { formatCurrency, formatKL, parseDate } from "./billing-engine.js";
 
     const criticalErrorContainer = document.getElementById("critical-error-container");
@@ -511,128 +511,114 @@
       const formattedReadingDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
       const timeStr = new Date().toLocaleTimeString("en-US", { hour12: false });
 
-      // Run final calculations for Firestore write
-      const breakdown = calculateBill(
-        consumption,
-        consumer,
-        rates,
-        consumer.outstanding_balance || 0,
-        consumer.credit_balance || 0,
-        activeCycle.last_payment_date,
-        null,
-        consumer.avg_6month_kl || null
-      );
-
       try {
-        const batch = writeBatch(db);
-        
-        let targetReadingId = editReadingId;
-        if (!isEditMode) {
-          // Generate a new document reference to get ID
-          const newReadingRef = doc(collection(db, "readings"));
-          targetReadingId = newReadingRef.id;
-        }
+        let finalReadingId = "";
 
-        const editWindowExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes window
+        await runTransaction(db, async (transaction) => {
+          // 1. Fetch the latest consumer data inside transaction
+          const consumerRef = doc(db, "consumers", consumer.cin_no);
+          const consumerSnap = await transaction.get(consumerRef);
+          if (!consumerSnap.exists()) {
+            throw "Consumer no longer exists.";
+          }
+          const freshConsumer = consumerSnap.data();
+          freshConsumer.cin_no = consumerSnap.id;
 
-        const readingDocData = {
-          cin_no: consumer.cin_no,
-          cycle_id: activeCycle.id,
-          previous_reading: lastReadingVal,
-          current_reading: curr,
-          consumption: consumption,
-          reading_date: formattedReadingDate,
-          reading_time: timeStr,
-          reader_uid: currentReader.uid,
-          reader_name: currentReader.name,
-          full_bill_breakdown: breakdown,
-          status: "finalized",
-          edited_by_admin: false,
-          cannot_read_reason: null,
-          submitted_at: serverTimestamp(),
-          edit_window_expiry: Timestamp.fromDate(editWindowExpiry),
-          anomaly_flagged: isAnomaly
-        };
+          let targetReadingId = editReadingId;
+          let freshOldReadingData = oldReadingData;
 
-        // Write the reading
-        batch.set(doc(db, "readings", targetReadingId), readingDocData);
+          if (isEditMode) {
+            const oldReadRef = doc(db, "readings", editReadingId);
+            const oldReadSnap = await transaction.get(oldReadRef);
+            if (!oldReadSnap.exists()) {
+              throw "Old reading data not found.";
+            }
+            freshOldReadingData = oldReadSnap.data();
+          } else {
+            const newReadingRef = doc(collection(db, "readings"));
+            targetReadingId = newReadingRef.id;
+          }
+          finalReadingId = targetReadingId;
 
-        // Calculate consumer adjustments
-        let finalOutstanding = 0;
-        let finalCredit = 0;
-
-        if (isEditMode && oldReadingData) {
-          // Rollback the old reading bill
-          const oldBillTotal = oldReadingData.full_bill_breakdown.total_amount || 0;
+          const editWindowExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes window
           
-          // Old credit applied rollback
-          const oldCreditApplied = oldReadingData.full_bill_breakdown.credit_applied || 0;
-          const oldRemainingCredit = oldReadingData.full_bill_breakdown.remaining_credit || 0;
-          
-          // Previous consumer state was:
-          // outstanding = (currentOutstanding - oldBillTotal)
-          // credit = (currentCredit + oldCreditApplied) (since it was deducted)
-          // Actually, let's just compute from the new breakdown values directly:
-          // For edit override:
-          // outstanding_balance should become = (currentOutstanding - oldBillTotal) + newBillTotal
-          // But wait, the previous outstanding already includes the old bill!
-          // So new outstanding_balance = (consumer.outstanding_balance - oldBillTotal) + breakdown.total_amount
-          // But wait! Let's think about this carefully.
-          // breakdown.total_amount = subtotalAfterCredit + previousOutstanding + lpsAmount.
-          // In the live breakdown calculation, previousOutstanding = consumer.outstanding_balance.
-          // If consumer.outstanding_balance already includes the old bill, then calling calculateBill with previousOutstanding = consumer.outstanding_balance will double-count the old bill!
-          // So to compute the new balance correctly:
-          // Let's deduce the consumer's base outstanding (excluding the old bill):
-          const baseOutstanding = (consumer.outstanding_balance || 0) - oldBillTotal;
-          // Let's deduce the consumer's base credit (excluding the old credit transaction):
-          // When the old bill was saved, credit_balance became remainingCredit.
-          // So the credit balance before the old bill was: credit_balance_now + oldCreditApplied
-          const baseCredit = (consumer.credit_balance || 0) + oldCreditApplied;
+          let breakdown;
+          let finalOutstanding = 0;
+          let finalCredit = 0;
 
-          // Now calculate the new bill based on base values!
-          const correctedBreakdown = calculateBill(
-            consumption,
-            consumer,
-            rates,
-            baseOutstanding,
-            baseCredit,
-            activeCycle.last_payment_date,
-            null,
-            consumer.avg_6month_kl || null
-          );
+          if (isEditMode && freshOldReadingData) {
+            const oldBreakdown = freshOldReadingData.full_bill_breakdown || {};
+            const oldCreditApplied = oldBreakdown.credit_applied || 0;
 
-          // Update the batch with the corrected breakdown
-          readingDocData.full_bill_breakdown = correctedBreakdown;
-          batch.set(doc(db, "readings", targetReadingId), readingDocData);
+            const baseOutstanding = oldBreakdown.previous_outstanding || 0;
+            const baseCredit = (freshConsumer.credit_balance || 0) + oldCreditApplied;
 
-          finalOutstanding = correctedBreakdown.previous_outstanding + correctedBreakdown.subtotal_before_lps - correctedBreakdown.credit_applied;
-          finalCredit = correctedBreakdown.remaining_credit;
+            breakdown = calculateBill(
+              consumption,
+              freshConsumer,
+              rates,
+              baseOutstanding,
+              baseCredit,
+              activeCycle.last_payment_date,
+              null,
+              freshConsumer.avg_6month_kl || null
+            );
 
-        } else {
-          // Initial entry
-          // New Outstanding = Previous Outstanding + subtotal_before_lps - credit_applied
-          finalOutstanding = (consumer.outstanding_balance || 0) + breakdown.subtotal_before_lps - breakdown.credit_applied;
-          finalCredit = breakdown.remaining_credit;
-        }
+            finalOutstanding = breakdown.previous_outstanding + breakdown.subtotal_before_lps - breakdown.credit_applied;
+            finalCredit = breakdown.remaining_credit;
+          } else {
+            breakdown = calculateBill(
+              consumption,
+              freshConsumer,
+              rates,
+              freshConsumer.outstanding_balance || 0,
+              freshConsumer.credit_balance || 0,
+              activeCycle.last_payment_date,
+              null,
+              freshConsumer.avg_6month_kl || null
+            );
 
-        // Update consumer document
-        const consumerUpdates = {
-          last_reading: curr,
-          outstanding_balance: Math.ceil(finalOutstanding),
-          credit_balance: finalCredit,
-          updated_at: serverTimestamp()
-        };
+            finalOutstanding = (freshConsumer.outstanding_balance || 0) + breakdown.subtotal_before_lps - breakdown.credit_applied;
+            finalCredit = breakdown.remaining_credit;
+          }
 
-        batch.update(doc(db, "consumers", consumer.cin_no), consumerUpdates);
-        await batch.commit();
+          const readingDocData = {
+            cin_no: freshConsumer.cin_no,
+            cycle_id: activeCycle.id,
+            previous_reading: isEditMode ? freshOldReadingData.previous_reading : freshConsumer.last_reading || freshConsumer.initial_meter_reading || 0,
+            current_reading: curr,
+            consumption: consumption,
+            reading_date: formattedReadingDate,
+            reading_time: timeStr,
+            reader_uid: currentReader.uid,
+            reader_name: currentReader.name,
+            full_bill_breakdown: breakdown,
+            status: "finalized",
+            edited_by_admin: false,
+            cannot_read_reason: null,
+            submitted_at: serverTimestamp(),
+            edit_window_expiry: Timestamp.fromDate(editWindowExpiry),
+            anomaly_flagged: isAnomaly
+          };
+
+          // Update readings and consumer documents
+          transaction.set(doc(db, "readings", targetReadingId), readingDocData);
+
+          transaction.update(consumerRef, {
+            last_reading: curr,
+            outstanding_balance: Math.ceil(finalOutstanding),
+            credit_balance: finalCredit,
+            updated_at: serverTimestamp()
+          });
+        });
 
         loadingOverlay.style.display = "none";
-        window.location.href = `confirmation.html?reading_id=${targetReadingId}`;
+        window.location.href = `confirmation.html?reading_id=${finalReadingId}`;
 
       } catch (error) {
         console.error("Submission error:", error);
         loadingOverlay.style.display = "none";
-        showAlert("An error occurred during submission. Please try again.", "danger");
+        showAlert("An error occurred during submission: " + error, "danger");
       }
     });
   </script>

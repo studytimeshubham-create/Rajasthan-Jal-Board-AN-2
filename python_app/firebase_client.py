@@ -309,63 +309,76 @@ def get_readings_for_cycle(cycle_id: str, cin_no: str = None) -> list:
 def admin_update_reading(reading_id: str, updates: dict, admin_name: str) -> None:
     """Updates a reading and recalculates the consumer's outstanding balance atomically."""
     import billing_engine
+    from utils import parse_date
     
     reading_ref = db.collection("readings").document(reading_id)
-    reading_doc = reading_ref.get()
-    if not reading_doc.exists:
-        raise FileNotFoundError(f"Reading {reading_id} not found.")
-        
-    old_reading = reading_doc.to_dict()
-    cin_no = old_reading["cin_no"]
-    
-    # Recalculate bill
-    new_curr = float(updates.get("current_reading", old_reading["current_reading"]))
-    prev_reading = float(old_reading["previous_reading"])
-    new_consumption = new_curr - prev_reading
-    if new_consumption < 0:
-        raise ValueError("Updated current reading cannot be less than previous reading.")
-        
-    consumer = get_consumer(cin_no)
-    rates = get_charges_config()
-    cycle = get_billing_cycle(old_reading["cycle_id"])
-    
-    # Rollback old bill amount from consumer outstanding first
-    old_total_amount = old_reading.get("full_bill_breakdown", {}).get("total_amount", 0.0)
-    
-    # Calculate new bill breakdown
-    # To properly calculate the bill, we need the billing details
-    from utils import parse_date
-    last_pay_date = parse_date(cycle["last_payment_date"]) if cycle else None
-    
-    new_breakdown = billing_engine.calculate_bill(
-        consumption_kl=new_consumption,
-        consumer=consumer,
-        rates=rates,
-        previous_outstanding=float(consumer["outstanding_balance"]) - old_total_amount, # adjust out the old bill
-        credit_balance=float(consumer["credit_balance"]),
-        last_payment_date=last_pay_date,
-        payment_date=date.today() # admin update date
-    )
-    
-    new_total_amount = new_breakdown["total_amount"]
-    
-    # Atomic transaction
     transaction = db.transaction()
     
     @firestore.transactional
-    def update_in_transaction(txn, consumer_ref, read_ref):
-        # Update consumer record balances
-        new_outstanding = max(0.0, float(consumer["outstanding_balance"]) - old_total_amount + new_total_amount)
+    def update_in_transaction(txn, read_ref):
+        reading_doc = txn.get(read_ref)
+        if not reading_doc.exists:
+            raise FileNotFoundError(f"Reading {reading_id} not found.")
+
+        old_reading = reading_doc.to_dict()
+        cin_no = old_reading["cin_no"]
+        cycle_id = old_reading["cycle_id"]
+
+        consumer_ref = db.collection("consumers").document(cin_no)
+        consumer_doc = txn.get(consumer_ref)
+        if not consumer_doc.exists:
+            raise FileNotFoundError(f"Consumer {cin_no} not found.")
+        consumer = consumer_doc.to_dict()
+        consumer["cin_no"] = cin_no
+
+        rates_ref = db.collection("charges_config").document("current")
+        rates_doc = txn.get(rates_ref)
+        rates = rates_doc.to_dict() if rates_doc.exists else DEFAULT_CHARGES_CONFIG
+
+        cycle_ref = db.collection("billing_cycles").document(cycle_id)
+        cycle_doc = txn.get(cycle_ref)
+        cycle = cycle_doc.to_dict() if cycle_doc.exists else {}
+
+        # Rollback old bill amount from consumer outstanding first
+        old_breakdown = old_reading.get("full_bill_breakdown", {})
+        old_total_amount = float(old_breakdown.get("total_amount", 0.0))
+        old_credit_applied = float(old_breakdown.get("credit_applied", 0.0))
+
+        # New values
+        new_curr = float(updates.get("current_reading", old_reading["current_reading"]))
+        prev_reading = float(old_reading["previous_reading"])
+        new_consumption = new_curr - prev_reading
+        if new_consumption < 0:
+            raise ValueError("Updated current reading cannot be less than previous reading.")
+
+        # Calculate base balances before the original bill was applied
+        # total_amount = previous_outstanding + subtotal_after_credit + lps_amount
+        # We need the previous_outstanding that was used for the original bill.
+        base_outstanding = float(old_breakdown.get("previous_outstanding", 0.0))
+        base_credit = float(consumer.get("credit_balance", 0.0)) + old_credit_applied
+
+        last_pay_date = parse_date(cycle.get("last_payment_date")) if cycle.get("last_payment_date") else None
+
+        new_breakdown = billing_engine.calculate_bill(
+            consumption_kl=new_consumption,
+            consumer=consumer,
+            rates=rates,
+            previous_outstanding=base_outstanding,
+            credit_balance=base_credit,
+            last_payment_date=last_pay_date,
+            payment_date=date.today()
+        )
+
+        new_outstanding = new_breakdown["total_amount"]
         new_credit = new_breakdown["remaining_credit"]
         
         txn.update(consumer_ref, {
             "last_reading": new_curr,
-            "outstanding_balance": new_outstanding,
-            "credit_balance": new_credit,
+            "outstanding_balance": float(new_outstanding),
+            "credit_balance": float(new_credit),
             "updated_at": firestore.SERVER_TIMESTAMP
         })
         
-        # Update reading record
         reading_updates = {
             "current_reading": new_curr,
             "consumption": new_consumption,
@@ -374,17 +387,9 @@ def admin_update_reading(reading_id: str, updates: dict, admin_name: str) -> Non
             "notes": updates.get("notes", old_reading.get("notes"))
         }
         txn.update(read_ref, reading_updates)
-        
-    consumer_ref = db.collection("consumers").document(cin_no)
-    update_in_transaction(transaction, consumer_ref, reading_ref)
-    
-    # Write audit log
-    new_log_data = {
-        "current_reading": new_curr,
-        "consumption": new_consumption,
-        "full_bill_breakdown": new_breakdown,
-        "edited_by_admin": True
-    }
+        return old_reading, reading_updates
+
+    old_reading, new_log_data = update_in_transaction(transaction, reading_ref)
     write_audit_log("ADMIN_UPDATE_READING", admin_name, f"readings/{reading_id}", old_reading, new_log_data)
 
 def bulk_update_readings(updates_list: list, admin_name: str) -> dict:
@@ -485,30 +490,30 @@ def record_payment(data: dict, admin_name: str) -> str:
     if amount <= 0:
         raise ValueError("Payment amount must be greater than zero.")
         
-    consumer = get_consumer(cin_no)
-    if not consumer:
-        raise FileNotFoundError(f"Consumer {cin_no} not found.")
-        
     payment_id = f"PAY-{datetime.now().strftime('%Y%m%d%H%M%S')}-{os.urandom(3).hex().upper()}"
     payment_ref = db.collection("payments").document(payment_id)
+    consumer_ref = db.collection("consumers").document(cin_no)
     
-    # Logic to adjust outstanding/credit balance
-    curr_outstanding = float(consumer["outstanding_balance"])
-    curr_credit = float(consumer["credit_balance"])
-    
-    # Apply payment to outstanding balance
-    if amount <= curr_outstanding:
-        new_outstanding = curr_outstanding - amount
-        new_credit = curr_credit
-    else:
-        new_outstanding = 0.0
-        new_credit = curr_credit + (amount - curr_outstanding)
-        
     # Transactional write
     transaction = db.transaction()
     
     @firestore.transactional
     def execute_payment(txn, consumer_ref, pay_ref):
+        consumer_doc = txn.get(consumer_ref)
+        if not consumer_doc.exists:
+            raise FileNotFoundError(f"Consumer {cin_no} not found.")
+        consumer = consumer_doc.to_dict()
+
+        curr_outstanding = float(consumer.get("outstanding_balance", 0.0))
+        curr_credit = float(consumer.get("credit_balance", 0.0))
+
+        if amount <= curr_outstanding:
+            new_outstanding = curr_outstanding - amount
+            new_credit = curr_credit
+        else:
+            new_outstanding = 0.0
+            new_credit = curr_credit + (amount - curr_outstanding)
+
         txn.update(consumer_ref, {
             "outstanding_balance": new_outstanding,
             "credit_balance": new_credit,
@@ -608,17 +613,6 @@ def list_payments(filters: dict = None) -> list:
 
 def update_consumer_lps_waiver(cin_no: str, waiver_amount: float, reason_note: str, admin_name: str) -> None:
     """Deducts an outstanding amount from a consumer due to an LPS waiver."""
-    consumer = get_consumer(cin_no)
-    if not consumer:
-        raise FileNotFoundError(f"Consumer {cin_no} not found.")
-        
-    curr_outstanding = float(consumer["outstanding_balance"])
-    if waiver_amount > curr_outstanding:
-        raise ValueError(f"Waiver amount {waiver_amount} cannot exceed outstanding balance {curr_outstanding}")
-        
-    new_outstanding = curr_outstanding - waiver_amount
-    
-    # Transactional write: create custom adjustment document and update consumer
     adj_id = f"ADJ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     adj_ref = db.collection("custom_adjustments").document(adj_id)
     consumer_ref = db.collection("consumers").document(cin_no)
@@ -627,6 +621,17 @@ def update_consumer_lps_waiver(cin_no: str, waiver_amount: float, reason_note: s
     
     @firestore.transactional
     def apply_waiver(txn, cons_ref, adjustment_ref):
+        consumer_doc = txn.get(cons_ref)
+        if not consumer_doc.exists:
+            raise FileNotFoundError(f"Consumer {cin_no} not found.")
+        consumer = consumer_doc.to_dict()
+
+        curr_outstanding = float(consumer.get("outstanding_balance", 0.0))
+        if waiver_amount > curr_outstanding:
+            raise ValueError(f"Waiver amount {waiver_amount} cannot exceed outstanding balance {curr_outstanding}")
+
+        new_outstanding = curr_outstanding - waiver_amount
+
         txn.update(cons_ref, {
             "outstanding_balance": new_outstanding,
             "updated_at": firestore.SERVER_TIMESTAMP
@@ -899,32 +904,6 @@ def reset_meter_reader_password(uid: str, new_password: str, admin_name: str) ->
 # ----------------------------------------------------
 def add_custom_adjustment(cin_no: str, adj_type: str, amount: float, reason_note: str, admin_name: str, cycle_id: str = None) -> str:
     """Applies a custom debit/credit adjustment (penalty/waiver) to a consumer's account."""
-    consumer = get_consumer(cin_no)
-    if not consumer:
-        raise FileNotFoundError(f"Consumer {cin_no} not found.")
-        
-    curr_outstanding = float(consumer["outstanding_balance"])
-    curr_credit = float(consumer["credit_balance"])
-    
-    # Adjust balances based on type
-    if adj_type == "penalty":
-        # Penalties increase outstanding balance
-        new_outstanding = curr_outstanding + amount
-        new_credit = curr_credit
-    elif adj_type == "waiver":
-        # Waivers reduce outstanding balance or increase credit balance
-        if amount <= curr_outstanding:
-            new_outstanding = curr_outstanding - amount
-            new_credit = curr_credit
-        else:
-            new_outstanding = 0.0
-            new_credit = curr_credit + (amount - curr_outstanding)
-    elif adj_type == "lps_waiver":
-        new_outstanding = max(0.0, curr_outstanding - amount)
-        new_credit = curr_credit
-    else:
-        raise ValueError(f"Unknown adjustment type: {adj_type}")
-        
     adj_id = f"ADJ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     adj_ref = db.collection("custom_adjustments").document(adj_id)
     consumer_ref = db.collection("consumers").document(cin_no)
@@ -933,6 +912,33 @@ def add_custom_adjustment(cin_no: str, adj_type: str, amount: float, reason_note
     
     @firestore.transactional
     def apply_adjustment(txn, cons_ref, adjustment_ref):
+        consumer_doc = txn.get(cons_ref)
+        if not consumer_doc.exists:
+            raise FileNotFoundError(f"Consumer {cin_no} not found.")
+        consumer = consumer_doc.to_dict()
+
+        curr_outstanding = float(consumer.get("outstanding_balance", 0.0))
+        curr_credit = float(consumer.get("credit_balance", 0.0))
+
+        # Adjust balances based on type
+        if adj_type == "penalty":
+            # Penalties increase outstanding balance
+            new_outstanding = curr_outstanding + amount
+            new_credit = curr_credit
+        elif adj_type == "waiver":
+            # Waivers reduce outstanding balance or increase credit balance
+            if amount <= curr_outstanding:
+                new_outstanding = curr_outstanding - amount
+                new_credit = curr_credit
+            else:
+                new_outstanding = 0.0
+                new_credit = curr_credit + (amount - curr_outstanding)
+        elif adj_type == "lps_waiver":
+            new_outstanding = max(0.0, curr_outstanding - amount)
+            new_credit = curr_credit
+        else:
+            raise ValueError(f"Unknown adjustment type: {adj_type}")
+
         txn.update(cons_ref, {
             "outstanding_balance": new_outstanding,
             "credit_balance": new_credit,
@@ -968,10 +974,6 @@ def get_adjustments_for_consumer(cin_no: str) -> list:
 # ----------------------------------------------------
 def record_meter_replacement(cin_no: str, old_serial: str, new_serial: str, replacement_date: str, new_initial_reading_kl: float, admin_name: str) -> str:
     """Logs a meter replacement event, updating serial no and resetting the verified reading on consumer document."""
-    consumer = get_consumer(cin_no)
-    if not consumer:
-        raise FileNotFoundError(f"Consumer {cin_no} not found.")
-        
     log_id = f"MTR-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     log_ref = db.collection("meter_replacement_log").document(log_id)
     consumer_ref = db.collection("consumers").document(cin_no)
@@ -980,6 +982,10 @@ def record_meter_replacement(cin_no: str, old_serial: str, new_serial: str, repl
     
     @firestore.transactional
     def replace_meter(txn, cons_ref, l_ref):
+        consumer_doc = txn.get(cons_ref)
+        if not consumer_doc.exists:
+            raise FileNotFoundError(f"Consumer {cin_no} not found.")
+
         txn.update(cons_ref, {
             "meter_serial_no": new_serial,
             "initial_meter_reading": float(new_initial_reading_kl),
