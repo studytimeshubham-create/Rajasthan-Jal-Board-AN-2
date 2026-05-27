@@ -359,17 +359,41 @@ class EditConsumerDialog(QDialog):
 class BulkImportTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
         super().__init__(parent)
-        self.fc = fc; self.utils = utils; self.admin_ctx = admin_ctx; self.setup_ui()
+        self.fc = fc; self.utils = utils; self.admin_ctx = admin_ctx; self.valid_data = []
+        self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<b>Bulk Import CSD (Excel)</b>"))
+        layout.addWidget(QLabel("<b>Bulk Import Consumer Static Data (Excel)</b>"))
+
+        # File Picker
+        top_h = QHBoxLayout()
         self.path_edit = QLineEdit(); self.path_edit.setReadOnly(True)
-        btn_h = QHBoxLayout(); btn_h.addWidget(self.path_edit)
-        browse_b = QPushButton("📂 Browse"); browse_b.clicked.connect(self.browse); btn_h.addWidget(browse_b); layout.addLayout(btn_h)
-        self.progress = QProgressBar(); self.progress.setVisible(False); layout.addWidget(self.progress)
-        import_b = QPushButton("🚀 Import"); import_b.clicked.connect(self.run_import); layout.addWidget(import_b)
-        dl_b = QPushButton("📥 Download Template"); dl_b.clicked.connect(self.dl_template); layout.addWidget(dl_b); layout.addStretch()
+        browse_b = QPushButton("📂 Browse..."); browse_b.clicked.connect(self.browse)
+        top_h.addWidget(self.path_edit); top_h.addWidget(browse_b)
+        layout.addLayout(top_h)
+
+        btn_h = QHBoxLayout()
+        load_b = QPushButton("🔍 Load & Preview"); load_b.clicked.connect(self.load_preview)
+        dl_b = QPushButton("📥 Download Template"); dl_b.clicked.connect(self.dl_template)
+        btn_h.addWidget(load_b); btn_h.addWidget(dl_b); btn_h.addStretch()
+        layout.addLayout(btn_h)
+
+        # Preview Table
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(["Row", "CIN", "Supply", "Sub-Cat", "Rooms/Plot", "Status", "Validation Error"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.table)
+
+        self.summary_lbl = QLabel("No file loaded.")
+        layout.addWidget(self.summary_lbl)
+
+        self.import_b = QPushButton("🚀 Confirm Import"); self.import_b.setEnabled(False)
+        self.import_b.clicked.connect(self.run_import)
+        layout.addWidget(self.import_b)
+
+        self.progress = QProgressBar(); self.progress.setVisible(False)
+        layout.addWidget(self.progress)
 
     def browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Excel", "", "Excel Files (*.xlsx)")
@@ -381,23 +405,79 @@ class BulkImportTab(QWidget):
             with open(path, "wb") as f: f.write(self.utils.get_excel_template_consumers())
             QMessageBox.information(self, "Saved", f"Template saved to {path}")
 
-    def run_import(self):
+    def load_preview(self):
         path = self.path_edit.text()
         if not path: return
-        self.progress.setVisible(True); self.progress.setRange(0, 0)
-        def run():
+        self.table.setRowCount(0); self.valid_data = []; self.import_b.setEnabled(False)
+
+        try:
             ws = openpyxl.load_workbook(path, data_only=True).active
             rows = list(ws.iter_rows(values_only=True))
+            if len(rows) < 2: return
             headers = [str(h).strip() for h in rows[0]]
-            data = []
-            for r in rows[1:]:
-                if not any(r): continue
-                payload = {headers[i]: r[i] for i in range(len(headers)) if i < len(r)}
-                data.append(payload)
-            return self.fc.bulk_create_consumers(data, self.admin_ctx["name"])
+
+            error_count = 0
+            for r_idx, r_vals in enumerate(rows[1:], start=2):
+                if not any(r_vals): continue
+                row_data = {headers[i]: r_vals[i] for i in range(len(headers)) if i < len(r_vals)}
+                error = self.validate_row(row_data, r_idx)
+
+                row = self.table.rowCount(); self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(str(r_idx)))
+                self.table.setItem(row, 1, QTableWidgetItem(str(row_data.get("cin_no", ""))))
+                self.table.setItem(row, 2, QTableWidgetItem(str(row_data.get("water_supply_type", ""))))
+                self.table.setItem(row, 3, QTableWidgetItem(str(row_data.get("sewerage_sub_category", ""))))
+
+                rooms_plot = ""
+                if row_data.get("num_rooms"): rooms_plot = f"Rooms: {row_data['num_rooms']}"
+                if row_data.get("plot_area_sqmtr"): rooms_plot = f"Plot: {row_data['plot_area_sqmtr']}"
+                self.table.setItem(row, 4, QTableWidgetItem(rooms_plot))
+                self.table.setItem(row, 5, QTableWidgetItem(str(row_data.get("consumer_status", ""))))
+
+                err_item = QTableWidgetItem(error or "Valid")
+                if error:
+                    error_count += 1
+                    for col in range(7): self.table.item(row, col).setBackground(Qt.red) if self.table.item(row, col) else None
+                    err_item.setForeground(Qt.white)
+                else:
+                    self.valid_data.append(row_data)
+                self.table.setItem(row, 6, err_item)
+
+            self.summary_lbl.setText(f"{len(self.valid_data)} rows valid, {error_count} rows with errors. " +
+                                     ("Errors must be fixed in the file before import." if error_count > 0 else ""))
+            self.import_b.setEnabled(error_count == 0 and len(self.valid_data) > 0)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load file: {e}")
+
+    def validate_row(self, data, n):
+        st = data.get("water_supply_type")
+        if st not in ["PHED", "Own Supply"]: return f"Row {n}: water_supply_type must be 'PHED' or 'Own Supply'"
+
+        has_sewer = data.get("has_sewer_connection")
+        if not isinstance(has_sewer, bool): return f"Row {n}: has_sewer_connection must be TRUE or FALSE"
+
+        if st == "Own Supply":
+            sub = data.get("sewerage_sub_category")
+            if not sub: return f"Row {n}: sewerage_sub_category required for Own Supply consumers"
+            if sub not in self.utils.SEWERAGE_SUB_CATEGORY_OPTIONS: return f"Row {n}: sewerage_sub_category value not recognized"
+            if sub == "Hotel":
+                rooms = data.get("num_rooms")
+                if rooms is None or (isinstance(rooms, (int, float)) and rooms <= 0): return f"Row {n}: num_rooms required for Hotel sub-category"
+            if sub == "Domestic (Own Supply)":
+                plot = data.get("plot_area_sqmtr")
+                if plot is None or (isinstance(plot, (int, float)) and plot <= 0): return f"Row {n}: plot_area_sqmtr required for Domestic (Own Supply) consumers"
+        return None
+
+    def run_import(self):
+        if not self.valid_data: return
+        self.progress.setVisible(True); self.progress.setRange(0, 0)
+        def run():
+            return self.fc.bulk_create_consumers(self.valid_data, self.admin_ctx["name"])
         def done(res):
             self.progress.setVisible(False)
-            QMessageBox.information(self, "Import Complete", f"Imported {res['success']} consumers. Errors: {len(res['errors'])}")
+            QMessageBox.information(self, "Success", f"Imported {res['success']} consumers.")
+            self.table.setRowCount(0); self.path_edit.clear(); self.import_b.setEnabled(False)
         self.utils.run_in_thread(run, callback=done, error_callback=lambda e: QMessageBox.critical(self, "Error", str(e)))
 
 class ExportTab(QWidget):
@@ -419,9 +499,21 @@ class ExportTab(QWidget):
             if z != "All": filters["zone"] = int(z)
             consumers = self.fc.list_consumers(filters)
             wb = openpyxl.Workbook(); ws = wb.active
-            headers = ["cin_no", "name", "zone", "category", "water_supply_type", "has_sewer_connection", "outstanding_balance"]
+            headers = [
+                "cin_no", "name", "zone", "category",
+                "water_supply_type", "has_sewer_connection", "sewerage_sub_category", "num_rooms", "plot_area_sqmtr",
+                "outstanding_balance"
+            ]
             ws.append(headers)
-            for c in consumers: ws.append([c.get(h) for h in headers])
+            for c in consumers:
+                row = []
+                for h in headers:
+                    val = c.get(h)
+                    # For PHED consumers, leave sewerage sub-fields blank
+                    if c.get("water_supply_type") == "PHED" and h in ["sewerage_sub_category", "num_rooms", "plot_area_sqmtr"]:
+                        val = ""
+                    row.append(val)
+                ws.append(row)
             wb.save(path)
         self.utils.run_in_thread(run, callback=lambda _: QMessageBox.information(self, "Done", "Export finished."))
 
