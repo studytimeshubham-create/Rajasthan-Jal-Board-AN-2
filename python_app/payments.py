@@ -81,24 +81,39 @@ class RecordPaymentTab(QWidget):
         except: return QMessageBox.warning(self, "Error", "Invalid amount.")
         p = {"cin_no": self.target_c["cin_no"], "amount": amount, "payment_mode": self.f_mode.currentText(), "emitra_key": self.f_key.text() if self.f_mode.currentText() == "E-Mitra" else None,
              "payment_date": self.f_date.text(), "entry_date": self.utils.today_str(), "cycle_id": self.f_cycle.currentText() or None, "notes": self.f_notes.text()}
-        def run(): return self.fc.record_payment(p, self.admin_ctx["name"])
+        def run(): self.fc.clear_cache(); return self.fc.record_payment(p, self.admin_ctx["name"])
         def done(pid):
-            if QMessageBox.question(self, "Success", f"Recorded: {pid}\nPrint receipt?") == QMessageBox.Yes: self.print_rcpt(pid)
+            if QMessageBox.question(self, "Success", f"Recorded: {pid}\nPrint receipt?") == QMessageBox.Yes: self.print_rcpt(pid, p, self.target_c)
             self.f_cin.clear(); self.f_amt.clear(); self.on_found(None)
         self.utils.run_in_thread(run, callback=done)
-    def print_rcpt(self, pid): pass # WeasyPrint logic...
+
+    def print_rcpt(self, pid, p, c):
+        def run():
+            tmpl = self.utils.load_pdf_template("payment_receipt")
+            h = tmpl.replace("{{receipt_number}}", pid).replace("{{cin_no}}", c["cin_no"]).replace("{{name}}", c["name"])\
+                    .replace("{{amount}}", self.utils.format_currency(p["amount"])).replace("{{payment_date}}", p["payment_date"])\
+                    .replace("{{received_by}}", self.admin_ctx["name"])
+            path = os.path.join(os.getcwd(), f"Receipt_{pid}.pdf")
+            with open(path, "wb") as f: f.write(self.utils.render_pdf_to_bytes(h))
+            return path
+        self.utils.run_in_thread(run, callback=self.utils.open_pdf)
 
 class BulkImportPaymentsTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
-        super().__init__(parent); self.fc = fc; self.utils = utils; self.setup_ui()
+        super().__init__(parent); self.fc = fc; self.utils = utils; self.admin_ctx = admin_ctx; self.setup_ui()
     def setup_ui(self):
         layout = QVBoxLayout(self); layout.addWidget(QLabel("<b>Bulk Import Payments (Excel)</b>"))
-        btn = QPushButton("🚀 Import Now"); btn.clicked.connect(self.run_import); layout.addWidget(btn); layout.addStretch()
+        self.path_edit = QLineEdit(); self.path_edit.setReadOnly(True)
+        h = QHBoxLayout(); h.addWidget(self.path_edit); b = QPushButton("📂 Browse"); b.clicked.connect(self.browse); h.addWidget(b); layout.addLayout(h)
+        import_b = QPushButton("🚀 Import"); import_b.clicked.connect(self.run_import); layout.addWidget(import_b); layout.addStretch()
+    def browse(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Select Excel", "", "Excel Files (*.xlsx)")
+        if p: self.path_edit.setText(p)
     def run_import(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Excel", "", "Excel Files (*.xlsx)")
-        if not path: return
+        p = self.path_edit.text()
+        if not p: return
         def run():
-            ws = openpyxl.load_workbook(path, data_only=True).active; rows = list(ws.iter_rows(values_only=True)); headers = [str(h).strip() for h in rows[0]]
+            ws = openpyxl.load_workbook(p, data_only=True).active; rows = list(ws.iter_rows(values_only=True)); headers = [str(h).strip() for h in rows[0]]
             data = []
             for r in rows[1:]:
                 if not any(r): continue
@@ -113,7 +128,8 @@ class PaymentLogTab(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self); self.table = QTableWidget(0, 7); self.table.setHorizontalHeaderLabels(["Receipt", "Date", "CIN", "Mode", "Key", "Amount", "Admin"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); layout.addWidget(self.table)
-        self.utils.run_in_thread(lambda: self.fc.list_payments({}), callback=self.done)
+        self.refresh()
+    def refresh(self): self.utils.run_in_thread(lambda: self.fc.list_payments({}), callback=self.done)
     def done(self, ps):
         self.table.setRowCount(0)
         for p in ps:
@@ -123,7 +139,7 @@ class PaymentLogTab(QWidget):
 
 class LPSWaiverTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
-        super().__init__(parent); self.fc = fc; self.utils = utils; self.setup_ui()
+        super().__init__(parent); self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx; self.setup_ui()
     def setup_ui(self):
         layout = QVBoxLayout(self); layout.addWidget(QLabel("<b>LPS Waiver Tool</b>"))
         self.f_cin = QLineEdit(); self.f_amt = QLineEdit(); self.f_note = QTextEdit()
@@ -135,8 +151,12 @@ class LPSWaiverTab(QWidget):
 
 class CreditBalanceTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
-        super().__init__(parent); self.fc = fc; self.utils = utils; self.setup_ui()
+        super().__init__(parent); self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx; self.setup_ui()
     def setup_ui(self):
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("<b>Credit Adjustments</b>"))
-        # Simplified implementation
-        layout.addStretch()
+        layout = QVBoxLayout(self); layout.addWidget(QLabel("<b>Credit Balance Adjustments</b>"))
+        self.f_cin = QLineEdit(); self.f_amt = QLineEdit(); self.f_note = QTextEdit()
+        lay = QFormLayout(); lay.addRow("CIN:", self.f_cin); lay.addRow("Adjustment Amount:", self.f_amt); lay.addRow("Reason:", self.f_note); layout.addLayout(lay)
+        btn = QPushButton("🪙 Save Adjustment"); btn.clicked.connect(self.save); layout.addWidget(btn); layout.addStretch()
+    def save(self):
+        def run(): self.fc.add_custom_adjustment(self.f_cin.text().strip(), "waiver", float(self.f_amt.text()), self.f_note.toPlainText().strip(), self.admin_ctx["name"])
+        self.utils.run_in_thread(run, callback=lambda _: QMessageBox.information(self, "Success", "Adjustment saved."))
