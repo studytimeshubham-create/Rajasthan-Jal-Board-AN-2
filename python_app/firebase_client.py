@@ -806,17 +806,18 @@ DEFAULT_CHARGES_CONFIG = {
     "meter_svc_20mm": 55.00,
     "meter_svc_25mm": 110.00,
 
-    # Sewerage & STP Charges
-    "sewerage_phed_supply_rate_pct": 20.0,
+    # Sewerage & STP Charges (11 keys)
+    "sewerage_phed_pct": 20.0,
+    "sewerage_stp_pct": 13.0,
     "sewerage_own_hotel_per_room": 31.25,
     "sewerage_own_restaurant": 200.00,
     "sewerage_own_cinema": 400.00,
-    "sewerage_own_car_service": 200.00,
+    "sewerage_own_car_truck_service": 200.00,
     "sewerage_own_scooter_service": 62.50,
-    "sewerage_own_other_ind_comm_per_room": 12.50,
-    "sewerage_own_domestic": 12.50,
-    "sewerage_own_house_large_per_100sqm": 6.25,
-    "stp_charge_rate_pct": 13.0,
+    "sewerage_own_other_industrial": 12.50,
+    "sewerage_own_domestic_base": 12.50,
+    "sewerage_own_domestic_per_100sqmtr": 6.25,
+    "sewerage_own_domestic_plot_threshold": 200.0,
 }
 
 def get_charges_config(use_cache: bool = True) -> dict:
