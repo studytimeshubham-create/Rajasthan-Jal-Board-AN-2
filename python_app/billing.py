@@ -8,12 +8,15 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Billing Cycles", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Cycles", style="Primary.TButton", command=lambda: build_active_tab(active_tab, fc, utils, be, admin, refresh=True)).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     notebook = ttk.Notebook(frame)
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=1, column=0, sticky="nsew")
     
     # Tab 1: Active Cycles
     active_tab = ttk.Frame(notebook, padding=10)
@@ -49,7 +52,10 @@ def build_active_tab(tab, fc, utils, be, admin, refresh=False):
     if refresh:
         fc.clear_cache("open_cycles")
 
-    ttk.Label(tab, text="Open Billing Cycles", style="Header.TLabel", foreground=utils.UI_COLORS["primary"]).pack(anchor="w", pady=(0, 10))
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
+
+    ttk.Label(tab, text="Open Billing Cycles", style="Header.TLabel", foreground=utils.UI_COLORS["primary"]).grid(row=0, column=0, sticky="w", pady=(0, 10))
     
     tree_columns = ("cycle_id", "zones", "start_date", "end_date", "last_pay", "progress", "skipped")
     tree = ttk.Treeview(tab, columns=tree_columns, show="headings", height=6)
@@ -69,9 +75,15 @@ def build_active_tab(tab, fc, utils, be, admin, refresh=False):
     tree.column("progress", width=140, anchor="center")
     tree.column("skipped", width=70, anchor="center")
     
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(fill="x", side="top")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     cycles_list = []
     
@@ -123,7 +135,7 @@ def build_active_tab(tab, fc, utils, be, admin, refresh=False):
         
     # Actions on selection
     action_frame = ttk.Frame(tab, padding=10)
-    action_frame.pack(fill="x", pady=10)
+    action_frame.grid(row=2, column=0, sticky="ew", pady=10)
     
     def close_cycle_action():
         sel = tree.selection()
@@ -561,10 +573,13 @@ def build_print_tab(tab, fc, utils, be, admin):
 # TAB 4: Past Cycles
 # ----------------------------------------------------
 def build_past_tab(tab, fc, utils, be, admin):
-    ttk.Label(tab, text="Closed Billing Cycles History", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
+
+    ttk.Label(tab, text="Closed Billing Cycles History", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, sticky="w", pady=(0, 10))
     
     tree_frame = ttk.Frame(tab)
-    tree_frame.pack(fill="both", expand=True)
+    tree_frame.grid(row=1, column=0, sticky="nsew")
     
     tree_columns = ("cycle_id", "zones", "period", "last_pay", "closed_at")
     tree = ttk.Treeview(tree_frame, columns=tree_columns, show="headings")
@@ -582,12 +597,14 @@ def build_past_tab(tab, fc, utils, be, admin):
     
     scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_frame.grid_columnconfigure(0, weight=1)
+    tree_frame.grid_rowconfigure(0, weight=1)
     
     # Detail summary below
     summary_f = ttk.LabelFrame(tab, text="Selected Cycle Summary Breakdown", padding=10)
-    summary_f.pack(fill="x", pady=10)
+    summary_f.grid(row=2, column=0, sticky="ew", pady=10)
     
     sum_lbl = ttk.Label(summary_f, text="Select a past cycle row above to view consolidated billing metrics.", font=("Segoe UI", 9, "italic"))
     sum_lbl.pack(anchor="w")

@@ -8,12 +8,15 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Meter Readings & Queries", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Readings", style="Primary.TButton", command=lambda: view_tab.perform_search(refresh=True)).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     notebook = ttk.Notebook(frame)
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=1, column=0, sticky="nsew")
     
     # Tab 1: View Readings
     view_tab = ttk.Frame(notebook, padding=10)
@@ -37,9 +40,12 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # TAB 1: View Readings & Overrides
 # ----------------------------------------------------
 def build_view_tab(tab, fc, utils, be, admin):
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
+
     # Filters
     f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
     ttk.Label(f_frame, text="Cycle:").pack(side="left", padx=5)
     cycle_var = tk.StringVar(value="All")
@@ -78,10 +84,15 @@ def build_view_tab(tab, fc, utils, be, admin):
     tree.column("status", width=80, anchor="center")
     tree.column("edited", width=60, anchor="center")
     
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     readings_list = []
     
@@ -470,8 +481,11 @@ def show_admin_override_dialog(reading, consumer, fc, utils, be, admin, parent, 
 def build_pending_tab(tab, fc, utils, be, admin, notebook, tab_idx):
     for w in tab.winfo_children():
         w.destroy()
+
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
         
-    ttk.Label(tab, text="Pending Correction Queries", style="Header.TLabel", foreground="#c0392b").pack(anchor="w", pady=(0, 10))
+    ttk.Label(tab, text="Pending Correction Queries", style="Header.TLabel", foreground="#c0392b").grid(row=0, column=0, sticky="w", pady=(0, 10))
     
     tree_columns = ("date", "cin_no", "name", "reader", "submitted", "requested", "reason")
     tree = ttk.Treeview(tab, columns=tree_columns, show="headings", height=8)
@@ -491,10 +505,15 @@ def build_pending_tab(tab, fc, utils, be, admin, notebook, tab_idx):
     tree.column("requested", width=90, anchor="e")
     tree.column("reason", width=220)
     
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     queries_cache = {}
     
@@ -611,8 +630,11 @@ def build_pending_tab(tab, fc, utils, be, admin, notebook, tab_idx):
 # TAB 3: All Correction Queries Log
 # ----------------------------------------------------
 def build_all_queries_tab(tab, fc, utils, be, admin):
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
+
     f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
     ttk.Label(f_frame, text="Filter by Cycle ID:").pack(side="left", padx=5)
     cycle_var = tk.StringVar(value="All")
@@ -646,10 +668,15 @@ def build_all_queries_tab(tab, fc, utils, be, admin):
     tree.column("status", width=80, anchor="center")
     tree.column("resolved", width=110, anchor="center")
     
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     queries_cache = {}
     

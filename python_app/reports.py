@@ -13,12 +13,15 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Analytics & Reports", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh All Data", style="Primary.TButton", command=lambda: fc.clear_cache()).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     notebook = ttk.Notebook(frame)
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=1, column=0, sticky="nsew")
     
     # 7 Tabs
     tab1 = ttk.Frame(notebook, padding=10) # Reader activity
@@ -29,6 +32,11 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     tab6 = ttk.Frame(notebook, padding=10) # Consumer ledger
     tab7 = ttk.Frame(notebook, padding=10) # Backup database
     
+    # Ensure they use grid for children if needed
+    for t in [tab1, tab2, tab3, tab4, tab5, tab6, tab7]:
+        t.grid_columnconfigure(0, weight=1)
+        t.grid_rowconfigure(1, weight=1)
+
     notebook.add(tab1, text="👷 Reader Logs")
     notebook.add(tab2, text="📊 Billing summary")
     notebook.add(tab3, text="🗺️ Zone Collections")
@@ -52,7 +60,7 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # ----------------------------------------------------
 def build_reader_activity_tab(tab, fc, utils, be, admin):
     f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
     ttk.Label(f_frame, text="Date From:").pack(side="left", padx=3)
     from_ent = ttk.Entry(f_frame, width=10)
@@ -87,7 +95,11 @@ def build_reader_activity_tab(tab, fc, utils, be, admin):
     load_readers()
     
     tree_columns = ("reader", "emp_id", "cin", "name", "date", "prev", "curr", "consumption", "status")
-    tree = ttk.Treeview(tab, columns=tree_columns, show="headings")
+
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    tree = ttk.Treeview(tree_container, columns=tree_columns, show="headings")
     tree.heading("reader", text="Reader")
     tree.heading("emp_id", text="Emp ID")
     tree.heading("cin", text="CIN")
@@ -104,14 +116,16 @@ def build_reader_activity_tab(tab, fc, utils, be, admin):
             tree.column(c, width=75, anchor="e")
         else:
             tree.column(c, width=100, anchor="w" if c != "cin" else "center")
-            
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     summary_lbl = ttk.Label(tab, text="Total Consumption Billed: 0.00 KL | Active Logs Count: 0", font=("Segoe UI", 9, "bold"))
-    summary_lbl.pack(anchor="w", pady=5)
+    summary_lbl.grid(row=2, column=0, sticky="w", pady=5)
     
     activity_cache = []
     
@@ -193,14 +207,20 @@ def build_reader_activity_tab(tab, fc, utils, be, admin):
 # TAB 2: Consolidated Billing Summary & Matplotlib
 # ----------------------------------------------------
 def build_billing_summary_tab(tab, fc, utils, be, admin):
-    f_frame = ttk.Frame(tab, padding=20)
-    f_frame.pack(fill="x")
+    tab.grid_rowconfigure(2, weight=1)
 
-    ttk.Label(f_frame, text="BILLING PERFORMANCE ANALYTICS", style="KPITitle.TLabel").pack(side="left", padx=5)
+    f_frame = ttk.Frame(tab, padding=20)
+    f_frame.grid(row=0, column=0, sticky="ew")
     
-    ttk.Label(f_frame, text="Cycle:").pack(side="left", padx=(20, 5))
+    ttk.Label(f_frame, text="BILLING PERFORMANCE ANALYTICS", style="KPITitle.TLabel").pack(side="left", padx=5)
+
+    # Use a sub-container for the cycle selector to avoid any layout issues
+    sel_frame = ttk.Frame(f_frame)
+    sel_frame.pack(side="left", padx=(20, 5))
+
+    ttk.Label(sel_frame, text="Cycle:").pack(side="left", padx=5)
     cycle_var = tk.StringVar()
-    cycle_cb = ttk.Combobox(f_frame, textvariable=cycle_var, width=18, state="readonly")
+    cycle_cb = ttk.Combobox(sel_frame, textvariable=cycle_var, width=18, state="readonly")
     cycle_cb.pack(side="left", padx=5)
     
     # Load cycles
@@ -217,7 +237,7 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
     
     # Financial metrics frame
     cards_frame = ttk.Frame(tab)
-    cards_frame.pack(fill="x", pady=10)
+    cards_frame.grid(row=1, column=0, sticky="ew", pady=10)
     
     kpis = {}
     kpi_fields = [
@@ -237,7 +257,7 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
         
     # Chart frame
     chart_frame = ttk.Frame(tab)
-    chart_frame.pack(fill="both", expand=True, pady=15)
+    chart_frame.grid(row=2, column=0, sticky="nsew", pady=15)
     
     canvas_container = [None]
     
@@ -291,14 +311,14 @@ def build_billing_summary_tab(tab, fc, utils, be, admin):
             
         utils.run_in_thread(fetch, callback=done, widget=tab)
 
-    ttk.Button(f_frame, text="📊 Run Analytics", command=generate_report).pack(side="left", padx=15)
+    ttk.Button(sel_frame, text="📊 Run Analytics", command=generate_report).pack(side="left", padx=15)
 
 # ----------------------------------------------------
 # TAB 3: Zone Collections Breakdown Table
 # ----------------------------------------------------
 def build_zone_collection_tab(tab, fc, utils, be, admin):
     f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
     ttk.Label(f_frame, text="Select Cycle:").pack(side="left", padx=5)
     cycle_var = tk.StringVar()
@@ -318,7 +338,11 @@ def build_zone_collection_tab(tab, fc, utils, be, admin):
     refresh_cycles()
     
     tree_columns = ("zone", "total", "read", "cannot", "pending", "billed", "collected", "pct")
-    tree = ttk.Treeview(tab, columns=tree_columns, show="headings")
+
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    tree = ttk.Treeview(tree_container, columns=tree_columns, show="headings")
     tree.heading("zone", text="Zone")
     tree.heading("total", text="Consumers")
     tree.heading("read", text="Read (Finalized)")
@@ -336,11 +360,13 @@ def build_zone_collection_tab(tab, fc, utils, be, admin):
     tree.column("billed", width=110, anchor="e")
     tree.column("collected", width=110, anchor="e")
     tree.column("pct", width=95, anchor="center")
-    
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     table_data = []
     
@@ -401,16 +427,19 @@ def build_zone_collection_tab(tab, fc, utils, be, admin):
 # TAB 4: Outstanding Balance Report
 # ----------------------------------------------------
 def build_outstanding_tab(tab, fc, utils, be, admin):
-    f = ttk.Frame(tab, padding=20)
-    f.pack(fill="both", expand=True)
+    tab.grid_rowconfigure(2, weight=1)
 
-    ttk.Label(f, text="DEFAULTERS & OUTSTANDING BALANCES", style="KPITitle.TLabel").pack(anchor="w", pady=(0, 20))
+    ttk.Label(tab, text="DEFAULTERS & OUTSTANDING BALANCES", style="KPITitle.TLabel").grid(row=0, column=0, sticky="w", pady=20)
     
-    btn_frame = ttk.Frame(f)
-    btn_frame.pack(fill="x", pady=5)
+    btn_frame = ttk.Frame(tab)
+    btn_frame.grid(row=1, column=0, sticky="ew", pady=5)
     
     tree_columns = ("cin_no", "name", "zone", "category", "outstanding", "credit", "status")
-    tree = ttk.Treeview(f, columns=tree_columns, show="headings")
+
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=2, column=0, sticky="nsew")
+
+    tree = ttk.Treeview(tree_container, columns=tree_columns, show="headings")
     tree.heading("cin_no", text="CIN")
     tree.heading("name", text="Consumer Name")
     tree.heading("zone", text="Zone")
@@ -427,10 +456,12 @@ def build_outstanding_tab(tab, fc, utils, be, admin):
     tree.column("credit", width=100, anchor="e")
     tree.column("status", width=80, anchor="center")
     
-    scrollbar = ttk.Scrollbar(f, orient="vertical", command=tree.yview)
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     outstanding_cache = []
     
@@ -535,7 +566,7 @@ def build_outstanding_tab(tab, fc, utils, be, admin):
 # ----------------------------------------------------
 def build_skipped_tab(tab, fc, utils, be, admin):
     f_frame = ttk.Frame(tab, padding=5)
-    f_frame.pack(fill="x", pady=(0, 10))
+    f_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
     ttk.Label(f_frame, text="Select Cycle:").pack(side="left", padx=5)
     cycle_var = tk.StringVar()
@@ -555,7 +586,11 @@ def build_skipped_tab(tab, fc, utils, be, admin):
     refresh_cycles()
     
     tree_columns = ("cin_no", "name", "zone", "reason", "reader", "date", "notes")
-    tree = ttk.Treeview(tab, columns=tree_columns, show="headings")
+
+    tree_container = ttk.Frame(tab)
+    tree_container.grid(row=1, column=0, sticky="nsew")
+
+    tree = ttk.Treeview(tree_container, columns=tree_columns, show="headings")
     tree.heading("cin_no", text="CIN")
     tree.heading("name", text="Consumer Name")
     tree.heading("zone", text="Zone")
@@ -571,11 +606,13 @@ def build_skipped_tab(tab, fc, utils, be, admin):
     tree.column("reader", width=130)
     tree.column("date", width=100, anchor="center")
     tree.column("notes", width=200)
-    
-    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
+
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree_container.grid_columnconfigure(0, weight=1)
+    tree_container.grid_rowconfigure(0, weight=1)
     
     table_data = []
     
@@ -608,11 +645,11 @@ def build_skipped_tab(tab, fc, utils, be, admin):
 # TAB 6: Ledger statement views & bulk export
 # ----------------------------------------------------
 def build_ledger_statement_tab(tab, fc, utils, be, admin):
-    ttk.Label(tab, text="Generate Consumer Ledger Statements", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+    ttk.Label(tab, text="Generate Consumer Ledger Statements", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, sticky="w", pady=(0, 10))
     
     # Left search single, Right bulk zone export
     lf = ttk.LabelFrame(tab, text="Single Consumer Ledger Report", padding=15)
-    lf.pack(fill="x", pady=10)
+    lf.grid(row=1, column=0, sticky="ew", pady=10)
     
     # Search
     ttk.Label(lf, text="Search consumer (CIN or Meter Serial):").pack(side="left")
@@ -715,7 +752,7 @@ def build_ledger_statement_tab(tab, fc, utils, be, admin):
     
     # Bulk Export Right
     rf = ttk.LabelFrame(tab, text="Bulk Zone Ledger Export (Excel Spreadsheet)", padding=15)
-    rf.pack(fill="x", pady=10)
+    rf.grid(row=2, column=0, sticky="ew", pady=10)
     
     ttk.Label(rf, text="Select Zone:").pack(side="left")
     zone_var = tk.StringVar(value="1")
@@ -787,12 +824,12 @@ def build_ledger_statement_tab(tab, fc, utils, be, admin):
 # TAB 7: Database Full Backup tools
 # ----------------------------------------------------
 def build_backup_tab(tab, fc, utils, be, admin):
-    ttk.Label(tab, text="Database Security & System Backups", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 10))
+    ttk.Label(tab, text="Database Security & System Backups", style="Header.TLabel", foreground="#1a3a6b").grid(row=0, column=0, sticky="w", pady=(0, 10))
     
     desc = "⚠️ ATTENTION: Exporting full backup downloads all records from Firebase (Consumers, Readings, Payments, Logs) " \
            "and writes them into separate sheets inside a single Excel Workbook. " \
            "This represents a resource intensive request. Run only when necessary."
-    ttk.Label(tab, text=desc, foreground="#c0392b", font=("Segoe UI", 9, "bold"), wrap=500).pack(anchor="w", pady=15)
+    ttk.Label(tab, text=desc, foreground="#c0392b", font=("Segoe UI", 9, "bold"), wrap=500).grid(row=1, column=0, sticky="w", pady=15)
     
     prog_bar = ttk.Progressbar(tab, orient="horizontal", mode="determinate", length=300)
     
@@ -850,4 +887,4 @@ def build_backup_tab(tab, fc, utils, be, admin):
             
         utils.run_in_thread(run, callback=done, error_callback=fail, widget=tab)
 
-    ttk.Button(tab, text="💾 Run Full System Backup", command=run_backup).pack(anchor="w", pady=10)
+    ttk.Button(tab, text="💾 Run Full System Backup", command=run_backup).grid(row=2, column=0, sticky="w", pady=10)

@@ -9,12 +9,15 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Payments & Adjustments", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Data", style="Primary.TButton", command=lambda: fc.clear_cache()).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     notebook = ttk.Notebook(frame)
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=1, column=0, sticky="nsew")
     
     # Tab 1: Record Payment
     record_tab = ttk.Frame(notebook, padding=10)

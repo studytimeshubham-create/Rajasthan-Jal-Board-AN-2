@@ -235,8 +235,7 @@ class AdminApp:
     def build_main_interface(self):
         # 1. Left Navigation Sidebar
         self.sidebar_frame = ttk.Frame(self.root, padding=0, width=220, style="Sidebar.TFrame")
-        self.sidebar_frame.pack(side="left", fill="y")
-        self.sidebar_frame.pack_propagate(False)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
         
         # Logo and branding in Sidebar
         c = utils.UI_COLORS
@@ -269,11 +268,14 @@ class AdminApp:
             
         # 2. Right Content Frame
         self.content_frame = ttk.Frame(self.root, padding=15)
-        self.content_frame.pack(side="right", fill="both", expand=True)
+        self.content_frame.grid(row=0, column=1, sticky="nsew")
         
         # 3. Status Bar at Bottom
         self.status_bar = ttk.Frame(self.root, padding=5, style="Sidebar.TFrame")
-        self.status_bar.pack(side="bottom", fill="x")
+        self.status_bar.grid(row=1, column=1, sticky="ew")
+
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
         
         admin_lbl = ttk.Label(self.status_bar, text=f"Logged in as: {self.logged_in_admin}  |  Connected to Firebase", font=("Segoe UI", 8), style="Sidebar.TLabel")
         admin_lbl.pack(side="left", padx=10)
@@ -319,6 +321,8 @@ class AdminApp:
                 mod = __import__(page_name)
                 admin_ctx = {"name": self.logged_in_admin}
                 self.current_frame = mod.get_frame(self.content_frame, fc, utils, be, admin_ctx)
+                if not self.current_frame:
+                    raise ImportError(f"Module {page_name} returned None frame")
             except Exception as e:
                 # Fallback error frame
                 self.current_frame = ttk.Frame(self.content_frame)
@@ -326,17 +330,20 @@ class AdminApp:
                 import traceback
                 traceback.print_exc()
                 
-        self.current_frame.pack(fill="both", expand=True)
+        self.current_frame.grid(row=0, column=0, sticky="nsew")
+        self.content_frame.grid_columnconfigure(0, weight=1)
+        self.content_frame.grid_rowconfigure(0, weight=1)
 
     # ----------------------------------------------------
     # Embedded Dashboard View
     # ----------------------------------------------------
     def get_dashboard_frame(self, parent):
-        frame = ttk.Frame(parent)
-        
+        frame = ttk.Frame(parent, padding=30)
+        frame.grid_columnconfigure(0, weight=1)
+
         # Title
         title_frame = ttk.Frame(frame)
-        title_frame.pack(fill="x", pady=(10, 25))
+        title_frame.grid(row=0, column=0, sticky="ew", pady=(0, 25))
         ttk.Label(title_frame, text="Rajasthan Jal Board Dashboard", style="Title.TLabel").pack(side="left")
         
         # Refresh button
@@ -345,7 +352,7 @@ class AdminApp:
         
         # Cards frame
         self.cards_frame = ttk.Frame(frame)
-        self.cards_frame.pack(fill="x", pady=10)
+        self.cards_frame.grid(row=1, column=0, sticky="ew", pady=10)
         
         # Grid layout for KPI Cards
         # We will create 6 cards
@@ -372,7 +379,7 @@ class AdminApp:
             
         # Alert frame for Pending Correction Queries (red/orange)
         self.alert_frame = ttk.Frame(frame, padding=10)
-        self.alert_frame.pack(fill="x", pady=15)
+        self.alert_frame.grid(row=2, column=0, sticky="ew", pady=15)
         
         self.load_dashboard_data()
         

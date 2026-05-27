@@ -1124,12 +1124,16 @@ def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
         for r in results:
             ts = r.get("timestamp")
             if ts:
-                # Firestore timestamp conversion
-                if hasattr(ts, "datetime"):
-                    r_date = ts.date()
+                if hasattr(ts, "to_datetime"):
+                    r_date = ts.to_datetime().date()
+                elif isinstance(ts, (datetime, date)):
+                    r_date = ts if isinstance(ts, date) else ts.date()
                 else:
-                    # ISO string
-                    r_date = datetime.fromisoformat(ts).date()
+                    try:
+                        # Attempt to parse as string if it's not a known date/timestamp type
+                        r_date = datetime.fromisoformat(str(ts)).date()
+                    except (ValueError, TypeError):
+                        continue
                     
                 if d_from <= r_date <= d_to:
                     filtered.append(r)
@@ -1140,9 +1144,14 @@ def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
         ts = x.get("timestamp")
         if not ts:
             return datetime.min
-        if hasattr(ts, "timestamp"):
+        if isinstance(ts, datetime):
             return ts
-        return datetime.fromisoformat(ts)
+        if hasattr(ts, "to_datetime"):
+            return ts.to_datetime()
+        try:
+            return datetime.fromisoformat(str(ts))
+        except:
+            return datetime.min
         
     results.sort(key=get_time, reverse=True)
     _cache[cache_key] = results

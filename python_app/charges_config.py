@@ -7,38 +7,44 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 30))
-    ttk.Label(header, text="TARIFF & RATE CONFIGURATION", style="KPITitle.TLabel").pack(side="left")
-    ttk.Button(header, text="🔄 Refresh Rates", style="Primary.TButton", command=lambda: load_active_rates()).pack(side="right")
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 30))
+    ttk.Label(header, text="TARIFF & RATE CONFIGURATION", style="KPITitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Button(header, text="🔄 Refresh Rates", style="Primary.TButton", command=lambda: load_active_rates()).grid(row=0, column=1, sticky="e")
+    header.grid_columnconfigure(0, weight=1)
 
     # Grid layout: Top Rate Explorer, Bottom Sandbox Test Widget
     frame.grid_columnconfigure(0, weight=1)
-    frame.grid_rowconfigure(0, weight=4) # Rates view
-    frame.grid_rowconfigure(1, weight=3) # Sandbox test
+    frame.grid_rowconfigure(1, weight=4) # Rates view
+    frame.grid_rowconfigure(2, weight=3) # Sandbox test
     
-    rates_view_panel = ttk.Frame(frame, style="Card.TFrame", padding=20)
-    rates_view_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    # Use standard Frame for outer containers and Card.TFrame for inner card
+    rates_view_panel = ttk.Frame(frame, padding=20)
+    rates_view_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
-    sandbox_panel = ttk.Frame(frame, style="Card.TFrame", padding=20)
-    sandbox_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+    sandbox_panel = ttk.Frame(frame, padding=20)
+    sandbox_panel.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
     
     active_rates = [None] # Local rates cache
     
     # ----------------------------------------------------
     # Rate Explorer Panel
     # ----------------------------------------------------
-    rates_text_frame = ttk.Frame(rates_view_panel)
-    rates_text_frame.pack(fill="both", expand=True)
+    rates_text_frame = ttk.Frame(rates_view_panel, style="Card.TFrame", padding=15)
+    rates_text_frame.grid(row=0, column=0, sticky="nsew")
+    rates_view_panel.grid_columnconfigure(0, weight=1)
+    rates_view_panel.grid_rowconfigure(0, weight=1)
     
     # Use Text widget for rich structured layout of rates
     rates_text = tk.Text(rates_text_frame, font=("Segoe UI", 9), wrap="word", relief="flat", bg="#fafafa", state="disabled")
     scrollbar = ttk.Scrollbar(rates_text_frame, orient="vertical", command=rates_text.yview)
     rates_text.configure(yscrollcommand=scrollbar.set)
-    rates_text.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    rates_text.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    rates_text_frame.grid_columnconfigure(0, weight=1)
+    rates_text_frame.grid_rowconfigure(0, weight=1)
     
     meta_lbl = ttk.Label(rates_view_panel, text="Loading active configuration...", font=("Segoe UI", 9, "italic"), foreground="#555")
-    meta_lbl.pack(anchor="w", pady=5)
+    meta_lbl.grid(row=1, column=0, sticky="w", pady=5)
     
     def populate_rates_display(rates):
         rates_text.config(state="normal")
@@ -134,7 +140,7 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
         
     # Buttons frame
     btn_frame = ttk.Frame(rates_view_panel)
-    btn_frame.pack(fill="x", pady=5)
+    btn_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
     
     def edit_rates_action():
         if not active_rates[0]:
@@ -342,14 +348,18 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     # ----------------------------------------------------
     # Sandbox Test Widget (Bottom Panel)
     # ----------------------------------------------------
-    sandbox_frame = ttk.Frame(sandbox_panel)
-    sandbox_frame.pack(fill="both", expand=True)
+    sandbox_frame = ttk.Frame(sandbox_panel, style="Card.TFrame", padding=20)
+    sandbox_frame.grid(row=0, column=0, sticky="nsew")
+    sandbox_panel.grid_columnconfigure(0, weight=1)
+    sandbox_panel.grid_rowconfigure(0, weight=1)
     
     inputs_f = ttk.Frame(sandbox_frame)
-    inputs_f.pack(side="left", fill="y", padx=5, pady=5)
+    inputs_f.grid(row=0, column=0, sticky="nsw", padx=5, pady=5)
     
     output_f = ttk.Frame(sandbox_frame, padding=5)
-    output_f.pack(side="right", fill="both", expand=True)
+    output_f.grid(row=0, column=1, sticky="nsew")
+    sandbox_frame.grid_columnconfigure(1, weight=1)
+    sandbox_frame.grid_rowconfigure(0, weight=1)
     
     # Inputs Setup
     r_idx = 0
@@ -378,9 +388,11 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     r_idx += 1
     
     # Output display
-    ttk.Label(output_f, text="Live Bill Breakdown Output:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    ttk.Label(output_f, text="Live Bill Breakdown Output:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
     breakdown_text = tk.Text(output_f, height=8, font=("Courier New", 9), state="disabled", bg="#fcfcfc")
-    breakdown_text.pack(fill="both", expand=True)
+    breakdown_text.grid(row=1, column=0, sticky="nsew", pady=(5, 0))
+    output_f.grid_rowconfigure(1, weight=1)
+    output_f.grid_columnconfigure(0, weight=1)
     
     def run_bill_simulation():
         if not active_rates[0]:

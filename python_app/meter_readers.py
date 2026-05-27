@@ -8,12 +8,15 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Meter Reader Management", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Readers", style="Primary.TButton", command=lambda: load_readers(use_cache=False)).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     content = ttk.Frame(frame)
-    content.pack(fill="both", expand=True)
+    content.grid(row=1, column=0, sticky="nsew")
 
     # Grid layout: Left 45% List, Right 55% Editor
     content.grid_columnconfigure(0, weight=4)

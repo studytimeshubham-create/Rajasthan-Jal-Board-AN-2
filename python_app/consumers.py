@@ -9,13 +9,16 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 20))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     ttk.Label(header, text="Consumer Management", style="Title.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Consumers", style="Primary.TButton", command=lambda: build_search_tab(search_tab, fc, utils, be, admin, refresh=True)).pack(side="right")
 
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(1, weight=1)
+
     # Notebook for tabs
     notebook = ttk.Notebook(frame)
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=1, column=0, sticky="nsew")
     
     # Tab 1: Search / View Consumers
     search_tab = ttk.Frame(notebook, padding=20)
@@ -49,9 +52,12 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
 # ----------------------------------------------------
 def build_search_tab(tab, fc, utils, be, admin, refresh=False):
     for w in tab.winfo_children(): w.destroy()
+    tab.grid_columnconfigure(0, weight=1)
+    tab.grid_rowconfigure(1, weight=1)
+
     # Top Search Bar
     s_frame = ttk.Frame(tab, padding=10)
-    s_frame.pack(fill="x", pady=(0, 20))
+    s_frame.grid(row=0, column=0, sticky="ew", pady=(0, 20))
     
     ttk.Label(s_frame, text="Search Query (CIN or Meter Serial):").pack(side="left", padx=5)
     search_ent = ttk.Entry(s_frame, width=30)
@@ -114,7 +120,7 @@ def build_search_tab(tab, fc, utils, be, admin, refresh=False):
     
     # Treeview container
     t_frame = ttk.Frame(tab, style="Card.TFrame", padding=1)
-    t_frame.pack(fill="both", expand=True)
+    t_frame.grid(row=1, column=0, sticky="nsew")
     
     tree = ttk.Treeview(t_frame, columns=tree_columns, show="headings")
     tree.heading("cin_no", text="CIN Number")
@@ -138,8 +144,10 @@ def build_search_tab(tab, fc, utils, be, admin, refresh=False):
     scrollbar = ttk.Scrollbar(t_frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
     
-    tree.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    t_frame.grid_columnconfigure(0, weight=1)
+    t_frame.grid_rowconfigure(0, weight=1)
     
     # Double-click logic
     def on_row_double_click(event):

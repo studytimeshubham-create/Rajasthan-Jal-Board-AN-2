@@ -9,13 +9,16 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Title and Refresh row
     header = ttk.Frame(frame)
-    header.pack(fill="x", pady=(0, 30))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 30))
     ttk.Label(header, text="SECURITY AUDIT TIMELINE", style="KPITitle.TLabel").pack(side="left")
     ttk.Button(header, text="🔄 Refresh Logs", style="Primary.TButton", command=lambda: refresh_logs()).pack(side="right")
     
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(2, weight=1)
+
     # Filters
     f_frame = ttk.Frame(frame, style="Card.TFrame", padding=15)
-    f_frame.pack(fill="x", pady=(0, 20))
+    f_frame.grid(row=1, column=0, sticky="ew", pady=(0, 20))
     
     ttk.Label(f_frame, text="Date From:").pack(side="left", padx=3)
     from_ent = ttk.Entry(f_frame, width=10)
@@ -40,7 +43,10 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     
     # Grid treeview
     tree_columns = ("timestamp", "action", "by", "target", "old_val", "new_val")
-    tree = ttk.Treeview(frame, columns=tree_columns, show="headings")
+    tree_container = ttk.Frame(frame)
+    tree_container.grid(row=2, column=0, sticky="nsew")
+
+    tree = ttk.Treeview(tree_container, columns=tree_columns, show="headings")
     tree.heading("timestamp", text="Timestamp")
     tree.heading("action", text="Action Type")
     tree.heading("by", text="Performed By")
@@ -55,9 +61,9 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
     tree.column("old_val", width=180)
     tree.column("new_val", width=180)
     
-    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+    scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="top", fill="both", expand=True)
+    tree.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
     
     logs_cache = {}
@@ -94,13 +100,17 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
                 
                 # Format timestamp
                 ts = l.get("timestamp")
+                ts_str = "—"
                 if ts:
-                    if hasattr(ts, "datetime"):
-                        ts_str = ts.datetime.strftime("%d-%m-%Y %H:%M:%S")
-                    else:
-                        ts_str = datetime.fromisoformat(ts).strftime("%d-%m-%Y %H:%M:%S")
-                else:
-                    ts_str = "—"
+                    try:
+                        if hasattr(ts, "to_datetime"):
+                            ts_str = ts.to_datetime().strftime("%d-%m-%Y %H:%M:%S")
+                        elif isinstance(ts, datetime):
+                            ts_str = ts.strftime("%d-%m-%Y %H:%M:%S")
+                        else:
+                            ts_str = datetime.fromisoformat(str(ts)).strftime("%d-%m-%Y %H:%M:%S")
+                    except:
+                        ts_str = str(ts)
                     
                 tree.insert("", "end", values=(
                     ts_str,
