@@ -1190,10 +1190,10 @@ def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
             return datetime.utcfromtimestamp(ts.seconds)
 
         try:
-            s = str(ts)
-            if "T" in s:
-                return datetime.fromisoformat(s.replace("Z", "+00:00"))
-            return datetime.fromisoformat(s)
+            res = _to_date(ts)
+            if res:
+                return datetime(res.year, res.month, res.day)
+            return datetime.min
         except:
             return datetime.min
         

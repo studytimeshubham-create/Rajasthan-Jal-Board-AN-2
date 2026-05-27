@@ -112,6 +112,8 @@ def format_date(dt) -> str:
     if "T" in s:
         # ISO format
         try:
+            if "Z" in s:
+                s = s.replace("Z", "+00:00")
             return datetime.fromisoformat(s).strftime("%d-%m-%Y")
         except ValueError:
             pass
@@ -127,7 +129,10 @@ def parse_date(s: str) -> date:
     except Exception:
         # Fallback to ISO parsing if DD-MM-YYYY fails
         try:
-            return datetime.fromisoformat(s.strip()).date()
+            val = s.strip()
+            if "Z" in val:
+                val = val.replace("Z", "+00:00")
+            return datetime.fromisoformat(val).date()
         except Exception:
             return date.today()
 

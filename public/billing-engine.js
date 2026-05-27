@@ -238,6 +238,7 @@ export default function calculateBill(
 
   // 4. sewerageTax
   let sewerageTax = 0.0;
+  let stpCharge = 0.0;
   const hasSewer = consumer.has_sewer_connection ?? false;
   if (hasSewer) {
     if (!isOwnSupply) {
@@ -283,7 +284,6 @@ export default function calculateBill(
   }
 
   // 5. stpCharge
-  let stpCharge = 0.0;
   if (hasSewer && !isOwnSupply) {
     if (isDomestic15mmWaiver) {
       stpCharge = 0.0;
