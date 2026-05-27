@@ -155,7 +155,7 @@ def calculate_bill(
         elif sub == "Scooter Service Station":
             sewerage_tax = float(rates.get("sewerage_own_scooter_service", 62.50))
         elif sub == "Other Industrial/Commercial":
-            sewerage_tax = consumer.get("num_rooms", 0) * float(rates.get("sewerage_own_other_industrial", 12.50))
+            sewerage_tax = float(rates.get("sewerage_own_other_industrial", 12.50))
         elif sub == "Domestic (Own Supply)":
             plot = consumer.get("plot_area_sqmtr", 0.0)
             threshold = float(rates.get("sewerage_own_domestic_plot_threshold", 200.0))
