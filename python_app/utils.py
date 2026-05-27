@@ -8,6 +8,7 @@ import io
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from weasyprint import HTML
+from PySide6.QtCore import QRunnable, QThreadPool, QObject, Signal, Slot
 
 # Design Tokens (Claude Editorial Style)
 UI_COLORS = {
@@ -39,14 +40,9 @@ UI_COLORS = {
 }
 
 # Constants
-CONSUMER_STATUS_OPTIONS = ["Active", "Inactive", "Meter Faulty", "Disconnected", "Disputed"]
-METER_SIZE_OPTIONS = ["15mm", "20mm", "25mm", "40mm", "50mm", "80mm", "100mm", "150mm"]
-CATEGORY_OPTIONS = ["Domestic", "Non-Domestic", "Industrial"]
-APL_BPL_OPTIONS = ["APL", "BPL"]
-ZONE_RANGE = range(1, 21)  # zones 1–20
+WATER_SUPPLY_TYPE_OPTIONS = ["PHED", "Own Supply"]
+READER_ROLE_OPTIONS       = ["Reader", "Cashier"]
 
-READER_ROLE_OPTIONS = ["Reader", "Cashier"]
-SUPPLY_TYPE_OPTIONS = ["PHED", "Own", "Mixed"]
 SEWERAGE_SUB_CATEGORY_OPTIONS = [
     "Hotel",
     "Restaurant",
@@ -54,9 +50,15 @@ SEWERAGE_SUB_CATEGORY_OPTIONS = [
     "Car/Truck Service Station",
     "Scooter Service Station",
     "Other Industrial/Commercial",
-    "Domestic",
-    "House > 200sqm"
+    "Domestic (Own Supply)",
 ]
+
+# Existing constants — do NOT change these:
+CONSUMER_STATUS_OPTIONS = ["Active", "Inactive", "Meter Faulty", "Disconnected", "Disputed"]
+METER_SIZE_OPTIONS      = ["15mm", "20mm", "25mm", "40mm", "50mm", "80mm", "100mm", "150mm"]
+CATEGORY_OPTIONS        = ["Domestic", "Non-Domestic", "Industrial"]
+APL_BPL_OPTIONS         = ["APL", "BPL"]
+ZONE_RANGE              = range(1, 21)
 
 def format_currency(amount: float) -> str:
     """Formats amount to Indian Rupees format, e.g. ₹1,234.56."""
@@ -110,6 +112,8 @@ def format_date(dt) -> str:
     if "T" in s:
         # ISO format
         try:
+            if "Z" in s:
+                s = s.replace("Z", "+00:00")
             return datetime.fromisoformat(s).strftime("%d-%m-%Y")
         except ValueError:
             pass
@@ -125,7 +129,10 @@ def parse_date(s: str) -> date:
     except Exception:
         # Fallback to ISO parsing if DD-MM-YYYY fails
         try:
-            return datetime.fromisoformat(s.strip()).date()
+            val = s.strip()
+            if "Z" in val:
+                val = val.replace("Z", "+00:00")
+            return datetime.fromisoformat(val).date()
         except Exception:
             return date.today()
 
@@ -139,57 +146,46 @@ def add_months(d: date, months: int) -> date:
     """
     return d + relativedelta(months=months)
 
-def run_in_thread(fn, *args, callback=None, error_callback=None, widget=None, **kwargs):
-    """Runs a function in a background daemon thread.
-    Coordinates callbacks back to the Tkinter thread safely via widget.after.
-    """
-    import threading
-    import traceback
+import traceback
 
-    def widget_exists():
-        if not widget:
-            return False
+class WorkerSignals(QObject):
+    result = Signal(object)
+    error  = Signal(str)
+
+class Worker(QRunnable):
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn      = fn
+        self.args    = args
+        self.kwargs  = kwargs
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self):
         try:
-            return bool(widget.winfo_exists())
+            self.signals.result.emit(self.fn(*self.args, **self.kwargs))
         except Exception:
-            return False
+            self.signals.error.emit(traceback.format_exc())
 
-    def is_destroyed_widget_error(exc):
-        return exc.__class__.__name__ == "TclError" and "invalid command name" in str(exc)
+def run_in_thread(fn, *args, callback=None, error_callback=None, **kwargs) -> Worker:
+    """
+    Runs fn(*args, **kwargs) on a background thread from Qt's global thread pool.
+    callback(result)       → called on main thread via Qt signal on success.
+    error_callback(tb_str) → called on main thread via Qt signal on exception.
+    Returns the Worker instance (caller does not need to retain it).
 
-    def dispatch(cb, value):
-        try:
-            cb(value)
-        except Exception as callback_error:
-            if not is_destroyed_widget_error(callback_error):
-                traceback.print_exc()
-
-    def schedule(cb, value):
-        if not cb:
-            return
-        if widget:
-            try:
-                if not widget.winfo_exists():
-                    return
-                widget.after(0, lambda value=value: dispatch(cb, value))
-            except Exception as schedule_error:
-                if not is_destroyed_widget_error(schedule_error):
-                    traceback.print_exc()
-        else:
-            dispatch(cb, value)
-
-    def wrapper():
-        try:
-            result = fn(*args, **kwargs)
-            schedule(callback, result)
-        except Exception as e:
-            traceback.print_exc()
-            schedule(error_callback, e)
-
-    thread = threading.Thread(target=wrapper)
-    thread.daemon = True
-    thread.start()
-    return thread
+    Note: The old 'widget=' parameter is removed. Qt signals are inherently
+    thread-safe and deliver to the main thread automatically.
+    """
+    worker = Worker(fn, *args, **kwargs)
+    if callback:
+        worker.signals.result.connect(callback)
+    worker.signals.error.connect(
+        error_callback if error_callback
+        else lambda tb: print("Background thread error:\n" + tb)
+    )
+    QThreadPool.globalInstance().start(worker)
+    return worker
 
 def generate_receipt_number() -> str:
     """Generates unique receipt numbers: RJB-YYYYMMDD-XXXXXX (6-digit zero-padded random)."""

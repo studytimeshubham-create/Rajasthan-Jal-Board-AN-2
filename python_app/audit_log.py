@@ -108,7 +108,10 @@ def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
                         elif isinstance(ts, datetime):
                             ts_str = ts.strftime("%d-%m-%Y %H:%M:%S")
                         else:
-                            ts_str = datetime.fromisoformat(str(ts)).strftime("%d-%m-%Y %H:%M:%S")
+                            s = str(ts)
+                            if "Z" in s:
+                                s = s.replace("Z", "+00:00")
+                            ts_str = datetime.fromisoformat(s).strftime("%d-%m-%Y %H:%M:%S")
                     except:
                         ts_str = str(ts)
                     
