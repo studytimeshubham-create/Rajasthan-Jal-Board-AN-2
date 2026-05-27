@@ -1,415 +1,216 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import sys
 import random
 import string
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
+    QTableWidgetItem, QHeaderView, QGroupBox, QFormLayout, QLineEdit,
+    QComboBox, QCheckBox, QMessageBox, QDialog, QApplication, QFrame, QAbstractItemView
+)
+from PySide6.QtCore import Qt, Slot
 
-def get_frame(parent, fc, utils, be, admin) -> ttk.Frame:
-    frame = ttk.Frame(parent)
-    
-    # Title and Refresh row
-    header = ttk.Frame(frame)
-    header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
-    ttk.Label(header, text="Meter Reader Management", style="Title.TLabel").pack(side="left")
-    ttk.Button(header, text="🔄 Refresh Readers", style="Primary.TButton", command=lambda: load_readers(use_cache=False)).pack(side="right")
+def get_widget(parent, fc, utils, be, admin_ctx) -> QWidget:
+    return MeterReadersWidget(parent, fc, utils, be, admin_ctx)
 
-    frame.grid_columnconfigure(0, weight=1)
-    frame.grid_rowconfigure(1, weight=1)
+class MeterReadersWidget(QWidget):
+    def __init__(self, parent, fc, utils, be, admin_ctx):
+        super().__init__(parent)
+        self.fc = fc
+        self.utils = utils
+        self.be = be
+        self.admin_ctx = admin_ctx
+        self.readers_list = []
+        self.current_reader = None
 
-    content = ttk.Frame(frame)
-    content.grid(row=1, column=0, sticky="nsew")
+        self.setup_ui()
+        self.load_readers()
 
-    # Grid layout: Left 45% List, Right 55% Editor
-    content.grid_columnconfigure(0, weight=4)
-    content.grid_columnconfigure(1, weight=5)
-    content.grid_rowconfigure(0, weight=1)
-    
-    left_panel = ttk.Frame(content, padding=10)
-    left_panel.grid(row=0, column=0, sticky="nsew")
-    
-    right_panel = ttk.Frame(content, style="Card.TFrame", padding=20)
-    right_panel.grid(row=0, column=1, sticky="nsew", padx=15, pady=10)
-    
-    # Left Panel Elements
-    ttk.Label(left_panel, text="Field Meter Readers", style="Header.TLabel", foreground="#1a3a6b").pack(anchor="w", pady=(0, 5))
-    
-    active_filter_var = tk.BooleanVar(value=False)
-    filter_cb = ttk.Checkbutton(left_panel, text="Active Profiles Only", variable=active_filter_var, command=lambda: load_readers())
-    filter_cb.pack(anchor="w", pady=5)
-    
-    tree_frame = ttk.Frame(left_panel)
-    tree_frame.pack(fill="both", expand=True)
-    
-    tree = ttk.Treeview(tree_frame, columns=("employee_id", "role", "name", "zone", "status"), show="headings")
-    tree.heading("employee_id", text="Emp ID")
-    tree.heading("role", text="Role")
-    tree.heading("name", text="Name")
-    tree.heading("zone", text="Zone")
-    tree.heading("status", text="Status")
-    tree.column("employee_id", width=80, anchor="center")
-    tree.column("role", width=70, anchor="center")
-    tree.column("name", width=150, anchor="w")
-    tree.column("zone", width=50, anchor="center")
-    tree.column("status", width=70, anchor="center")
-    
-    scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-    tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-    
-    # Local cache of loaded readers
-    readers_list = []
-    current_selected_uid = [None]
-    
-    # Editor fields
-    fields = {}
-    
-    def load_readers(use_cache=True):
-        for item in tree.get_children():
-            tree.delete(item)
-            
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        header = QHBoxLayout()
+        title_lbl = QLabel("METER READER MANAGEMENT")
+        title_lbl.setObjectName("page_title")
+        header.addWidget(title_lbl)
+
+        refresh_btn = QPushButton("🔄 Refresh Readers")
+        refresh_btn.clicked.connect(lambda: self.load_readers(use_cache=False))
+        header.addWidget(refresh_btn, 0, Qt.AlignRight)
+        layout.addLayout(header)
+
+        content = QHBoxLayout()
+        layout.addLayout(content)
+
+        # Left Panel: List
+        left_panel = QWidget()
+        left_lay = QVBoxLayout(left_panel)
+
+        filter_h = QHBoxLayout()
+        self.active_only_chk = QCheckBox("Active Profiles Only")
+        self.active_only_chk.stateChanged.connect(lambda: self.load_readers())
+        filter_h.addWidget(self.active_only_chk)
+        left_lay.addLayout(filter_h)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Emp ID", "Role", "Name", "Zone", "Status"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        left_lay.addWidget(self.table)
+
+        new_btn = QPushButton("➕ Register New Reader")
+        new_btn.clicked.connect(self.open_new_reader_dialog)
+        left_lay.addWidget(new_btn)
+
+        content.addWidget(left_panel, 4)
+
+        # Right Panel: Editor
+        self.editor_group = QGroupBox("READER PROFILE EDITOR")
+        self.editor_lay = QFormLayout(self.editor_group)
+        self.editor_lay.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.f_name = QLineEdit()
+        self.f_emp_id = QLineEdit()
+        self.f_phone = QLineEdit()
+        self.f_desig = QLineEdit()
+        self.f_addr = QLineEdit()
+        self.f_zone = QComboBox()
+        self.f_zone.addItems([""] + [str(z) for z in self.utils.ZONE_RANGE])
+        self.f_role = QComboBox()
+        self.f_role.addItems(self.utils.READER_ROLE_OPTIONS)
+
+        self.editor_lay.addRow("Name:*", self.f_name)
+        self.editor_lay.addRow("Employee ID:*", self.f_emp_id)
+        self.editor_lay.addRow("Phone Number:", self.f_phone)
+        self.editor_lay.addRow("Designation:", self.f_desig)
+        self.editor_lay.addRow("Address:", self.f_addr)
+        self.editor_lay.addRow("Zone Filter:", self.f_zone)
+        self.editor_lay.addRow("System Role:*", self.f_role)
+
+        self.save_btn = QPushButton("💾 Save Profile Edits")
+        self.save_btn.clicked.connect(self.save_edits)
+        self.editor_lay.addRow(self.save_btn)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine); sep.setFrameShadow(QFrame.Sunken)
+        self.editor_lay.addRow(sep)
+
+        self.status_btn = QPushButton("🔒 Deactivate")
+        self.status_btn.clicked.connect(self.toggle_status)
+        self.editor_lay.addRow(self.status_btn)
+
+        self.reset_btn = QPushButton("🔑 Reset Password")
+        self.reset_btn.clicked.connect(self.reset_password)
+        self.editor_lay.addRow(self.reset_btn)
+
+        content.addWidget(self.editor_group, 5)
+        self.set_editor_enabled(False)
+
+    def load_readers(self, use_cache=True):
         def fetch():
-            return fc.list_meter_readers(active_filter_var.get(), use_cache=use_cache)
-            
+            return self.fc.list_meter_readers(self.active_only_chk.isChecked(), use_cache=use_cache)
         def done(readers):
-            nonlocal readers_list
-            readers_list = readers
+            self.readers_list = readers
+            self.table.setRowCount(0)
             for r in readers:
-                status = "Active" if r.get("is_active", True) else "Inactive"
-                zone = str(r.get("zone")) if r.get("zone") is not None else "All"
-                tree.insert("", "end", values=(r["employee_id"], r.get("role", "Reader"), r["name"], zone, status), iid=r["uid"])
-            clear_editor()
-            
-        utils.run_in_thread(fetch, callback=done, widget=frame)
-        
-    def clear_editor():
-        current_selected_uid[0] = None
-        for ent in fields.values():
-            if not isinstance(ent, tk.BooleanVar):
-                if isinstance(ent, ttk.Entry):
-                    ent.delete(0, "end")
-                elif isinstance(ent, ttk.Combobox):
-                    ent.set("")
-        # Disable editor inputs except New
-        set_editor_state("disabled")
-        deactivate_btn.config(state="disabled")
-        reset_pwd_btn.config(state="disabled")
-        
-    def set_editor_state(state):
-        for ent in fields.values():
-            ent.config(state=state)
-        save_btn.config(state=state)
-        
-    def on_tree_select(event):
-        sel = tree.selection()
-        if not sel:
-            return
-        uid = sel[0]
-        current_selected_uid[0] = uid
-        
-        # Find reader details
-        reader = next((r for r in readers_list if r["uid"] == uid), None)
-        if not reader:
-            return
-            
-        set_editor_state("normal")
-        
-        fields["name"].delete(0, "end")
-        fields["name"].insert(0, reader["name"])
-        
-        fields["employee_id"].delete(0, "end")
-        fields["employee_id"].insert(0, reader["employee_id"])
-        
-        fields["phone_number"].delete(0, "end")
-        fields["phone_number"].insert(0, reader.get("phone_number", ""))
-        
-        fields["designation"].delete(0, "end")
-        fields["designation"].insert(0, reader.get("designation", ""))
-        
-        fields["address"].delete(0, "end")
-        fields["address"].insert(0, reader.get("address", ""))
-        
-        zone_val = str(reader["zone"]) if reader.get("zone") is not None else ""
-        fields["zone"].set(zone_val)
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(r["employee_id"]))
+                self.table.setItem(row, 1, QTableWidgetItem(r.get("role", "Reader")))
+                self.table.setItem(row, 2, QTableWidgetItem(r["name"]))
+                self.table.setItem(row, 3, QTableWidgetItem(str(r.get("zone") if r.get("zone") is not None else "All")))
+                self.table.setItem(row, 4, QTableWidgetItem("Active" if r.get("is_active", True) else "Inactive"))
+                self.table.item(row, 0).setData(Qt.UserRole, r["uid"])
+            self.set_editor_enabled(False)
+        self.utils.run_in_thread(fetch, callback=done)
 
-        fields["role"].set(reader.get("role", "Reader"))
-        
-        # Configure buttons status
-        deactivate_btn.config(state="normal")
-        reset_pwd_btn.config(state="normal")
-        
-        is_active = reader.get("is_active", True)
-        deactivate_btn.config(text="🔒 Deactivate" if is_active else "🔓 Reactivate")
-        
-    tree.bind("<<TreeviewSelect>>", on_tree_select)
-    
-    # Build Editor Interface
-    ttk.Label(right_panel, text="READER PROFILE EDITOR", style="KPITitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 20))
-    row_idx = 1
-    ttk.Label(right_panel, text="Name:*").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["name"] = ttk.Entry(right_panel, width=30)
-    fields["name"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    ttk.Label(right_panel, text="Employee ID:*").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["employee_id"] = ttk.Entry(right_panel, width=20)
-    fields["employee_id"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    ttk.Label(right_panel, text="Phone Number:").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["phone_number"] = ttk.Entry(right_panel, width=20)
-    fields["phone_number"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    ttk.Label(right_panel, text="Designation:").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["designation"] = ttk.Entry(right_panel, width=25)
-    fields["designation"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    ttk.Label(right_panel, text="Address:").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["address"] = ttk.Entry(right_panel, width=35)
-    fields["address"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    ttk.Label(right_panel, text="Default Zone Filter:").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["zone"] = ttk.Combobox(right_panel, values=[""] + [str(z) for z in utils.ZONE_RANGE], state="readonly", width=8)
-    fields["zone"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
+    def on_selection_changed(self):
+        sel = self.table.selectedItems()
+        if not sel: return
+        uid = self.table.item(sel[0].row(), 0).data(Qt.UserRole)
+        self.current_reader = next((r for r in self.readers_list if r["uid"] == uid), None)
+        if self.current_reader:
+            self.set_editor_enabled(True)
+            self.f_name.setText(self.current_reader["name"])
+            self.f_emp_id.setText(self.current_reader["employee_id"])
+            self.f_phone.setText(self.current_reader.get("phone_number", ""))
+            self.f_desig.setText(self.current_reader.get("designation", ""))
+            self.f_addr.setText(self.current_reader.get("address", ""))
+            self.f_zone.setCurrentText(str(self.current_reader.get("zone") if self.current_reader.get("zone") is not None else ""))
+            self.f_role.setCurrentText(self.current_reader.get("role", "Reader"))
+            is_active = self.current_reader.get("is_active", True)
+            self.status_btn.setText("🔒 Deactivate" if is_active else "🔓 Reactivate")
 
-    ttk.Label(right_panel, text="System Role:*").grid(row=row_idx, column=0, sticky="w", pady=5)
-    fields["role"] = ttk.Combobox(right_panel, values=utils.READER_ROLE_OPTIONS, state="readonly", width=15)
-    fields["role"].grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    # Save edits action
-    def save_edits():
-        uid = current_selected_uid[0]
-        if not uid:
-            return
-        name = fields["name"].get().strip()
-        emp_id = fields["employee_id"].get().strip()
-        if not name or not emp_id:
-            messagebox.showerror("Error", "Required fields (*) cannot be empty.", parent=frame)
-            return
-            
-        zone_str = fields["zone"].get()
+    def set_editor_enabled(self, enabled):
+        self.editor_group.setEnabled(enabled)
+
+    def save_edits(self):
+        if not self.current_reader: return
         payload = {
-            "name": name,
-            "employee_id": emp_id,
-            "phone_number": fields["phone_number"].get().strip() or None,
-            "designation": fields["designation"].get().strip() or None,
-            "address": fields["address"].get().strip() or None,
-            "zone": int(zone_str) if zone_str else None,
-            "role": fields["role"].get()
+            "name": self.f_name.text().strip(),
+            "employee_id": self.f_emp_id.text().strip(),
+            "phone_number": self.f_phone.text().strip() or None,
+            "designation": self.f_desig.text().strip() or None,
+            "address": self.f_addr.text().strip() or None,
+            "zone": int(self.f_zone.currentText()) if self.f_zone.currentText() else None,
+            "role": self.f_role.currentText()
         }
-        
-        def save():
-            fc.update_meter_reader(uid, payload, admin["name"])
-            
-        def done(res):
-            messagebox.showinfo("Success", "Profile updated successfully.", parent=frame)
-            load_readers()
-            
-        def fail(err):
-            messagebox.showerror("Error", f"Failed saving edits:\n{err}", parent=frame)
-            
-        utils.run_in_thread(save, callback=done, error_callback=fail, widget=frame)
-        
-    save_btn = ttk.Button(right_panel, text="💾 Save Profile Edits", command=save_edits)
-    save_btn.grid(row=row_idx, column=1, sticky="w", pady=10)
-    row_idx += 1
-    
-    # Other actions panel
-    ttk.Separator(right_panel, orient="horizontal").grid(row=row_idx, column=0, columnspan=2, sticky="ew", pady=15)
-    row_idx += 1
-    
-    def toggle_status():
-        uid = current_selected_uid[0]
-        if not uid:
-            return
-        reader = next((r for r in readers_list if r["uid"] == uid), None)
-        if not reader:
-            return
-        active = reader.get("is_active", True)
-        action_str = "deactivate" if active else "reactivate"
-        confirm = messagebox.askyesno("Confirm Toggle", f"Are you sure you want to {action_str} {reader['name']}?", parent=frame)
-        if not confirm:
-            return
+        if not payload["name"] or not payload["employee_id"]:
+            return QMessageBox.warning(self, "Error", "Required fields empty.")
             
         def run():
-            if active:
-                fc.deactivate_meter_reader(uid, admin["name"])
-            else:
-                fc.reactivate_meter_reader(uid, admin["name"])
-                
-        def done(res):
-            messagebox.showinfo("Success", f"Reader profile {action_str}d successfully.", parent=frame)
-            load_readers()
-            
-        def fail(err):
-            messagebox.showerror("Error", f"Action failed:\n{err}", parent=frame)
-            
-        utils.run_in_thread(run, callback=done, error_callback=fail, widget=frame)
+            self.fc.update_meter_reader(self.current_reader["uid"], payload, self.admin_ctx["name"])
+        self.utils.run_in_thread(run, callback=lambda _: [QMessageBox.information(self, "Success", "Profile updated."), self.load_readers()])
 
-    deactivate_btn = ttk.Button(right_panel, text="🔒 Deactivate", command=toggle_status)
-    deactivate_btn.grid(row=row_idx, column=0, sticky="w", pady=5)
-    
-    def reset_password_action():
-        uid = current_selected_uid[0]
-        if not uid:
-            return
-        reader = next((r for r in readers_list if r["uid"] == uid), None)
-        
-        pwd_win = tk.Toplevel(frame)
-        pwd_win.title(f"Reset Password — {reader['name']}")
-        pwd_win.geometry("300x180")
-        pwd_win.resizable(False, False)
-        pwd_win.grab_set()
-        
-        ttk.Label(pwd_win, text="Enter New Password:").pack(pady=10)
-        pwd_ent = ttk.Entry(pwd_win, show="*", width=25)
-        pwd_ent.pack(pady=2)
-        pwd_ent.focus()
-        
-        def save():
-            pwd = pwd_ent.get().strip()
-            if len(pwd) < 6:
-                messagebox.showerror("Error", "Password must be at least 6 characters.", parent=pwd_win)
-                return
-            
-            def run():
-                fc.reset_meter_reader_password(uid, pwd, admin["name"])
-                
-            def done(res):
-                messagebox.showinfo("Success", "Password reset successful.", parent=frame)
-                pwd_win.destroy()
-                
-            def fail(err):
-                messagebox.showerror("Error", f"Reset failed:\n{err}", parent=pwd_win)
-                
-            utils.run_in_thread(run, callback=done, error_callback=fail, widget=pwd_win)
-            
-        ttk.Button(pwd_win, text="Reset Password", command=save).pack(pady=15)
-        
-    reset_pwd_btn = ttk.Button(right_panel, text="🔑 Reset Password", command=reset_password_action)
-    reset_pwd_btn.grid(row=row_idx, column=1, sticky="w", pady=5)
-    row_idx += 1
-    
-    # New reader dialog button
-    def open_new_reader_dialog():
-        dlg = tk.Toplevel(frame)
-        dlg.title("Register New Meter Reader")
-        dlg.geometry("420x450")
-        dlg.grab_set()
-        
-        ttk.Label(dlg, text="New Reader Registration", font=("Segoe UI", 12, "bold"), foreground="#1a3a6b").pack(pady=15)
-        f_dlg = ttk.Frame(dlg, padding=10)
-        f_dlg.pack(fill="both", expand=True)
-        
-        d_fields = {}
-        
-        # Form
-        r = 0
-        ttk.Label(f_dlg, text="Name:*").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["name"] = ttk.Entry(f_dlg, width=25)
-        d_fields["name"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Employee ID:*").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["emp_id"] = ttk.Entry(f_dlg, width=15)
-        d_fields["emp_id"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Username (Email prefix):*").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["username"] = ttk.Entry(f_dlg, width=20)
-        d_fields["username"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        # Generate password initially
-        pwd_chars = string.ascii_letters + string.digits + "!@#$"
-        gen_pwd = "".join(random.choice(pwd_chars) for _ in range(10))
-        
-        ttk.Label(f_dlg, text="Temporary Password:*").grid(row=r, column=0, sticky="w", pady=4)
-        pass_f = ttk.Frame(f_dlg)
-        pass_f.grid(row=r, column=1, sticky="w", pady=4)
-        d_fields["password"] = ttk.Entry(pass_f, width=15)
-        d_fields["password"].pack(side="left")
-        d_fields["password"].insert(0, gen_pwd)
-        
-        def copy_pwd():
-            frame.clipboard_clear()
-            frame.clipboard_append(d_fields["password"].get())
-            messagebox.showinfo("Clipboard", "Password copied to clipboard!", parent=dlg)
-            
-        ttk.Button(pass_f, text="📋 Copy", command=copy_pwd, width=6).pack(side="left", padx=5)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Phone Number:").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["phone"] = ttk.Entry(f_dlg, width=20)
-        d_fields["phone"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Designation:").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["desig"] = ttk.Entry(f_dlg, width=20)
-        d_fields["desig"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Address:").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["addr"] = ttk.Entry(f_dlg, width=30)
-        d_fields["addr"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        
-        ttk.Label(f_dlg, text="Default Zone Filter:").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["zone"] = ttk.Combobox(f_dlg, values=[""] + [str(z) for z in utils.ZONE_RANGE], state="readonly", width=8)
-        d_fields["zone"].grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
+    def toggle_status(self):
+        if not self.current_reader: return
+        active = self.current_reader.get("is_active", True)
+        if QMessageBox.question(self, "Confirm", f"Sure to {'deactivate' if active else 'reactivate'}?") == QMessageBox.Yes:
+            fn = self.fc.deactivate_meter_reader if active else self.fc.reactivate_meter_reader
+            self.utils.run_in_thread(lambda: fn(self.current_reader["uid"], self.admin_ctx["name"]), callback=lambda _: self.load_readers())
 
-        ttk.Label(f_dlg, text="System Role:*").grid(row=r, column=0, sticky="w", pady=4)
-        d_fields["role"] = ttk.Combobox(f_dlg, values=utils.READER_ROLE_OPTIONS, state="readonly", width=15)
-        d_fields["role"].grid(row=r, column=1, sticky="w", pady=4)
-        d_fields["role"].set("Reader")
-        r += 1
-        
-        def save():
-            name = d_fields["name"].get().strip()
-            emp_id = d_fields["emp_id"].get().strip()
-            usr = d_fields["username"].get().strip()
-            pwd = d_fields["password"].get().strip()
-            
-            if not name or not emp_id or not usr or not pwd:
-                messagebox.showerror("Error", "Required fields (*) cannot be empty.", parent=dlg)
-                return
-                
-            zone_val = d_fields["zone"].get()
-            payload = {
-                "name": name,
-                "employee_id": emp_id,
-                "username": usr,
-                "password": pwd,
-                "phone_number": d_fields["phone"].get().strip() or None,
-                "designation": d_fields["desig"].get().strip() or None,
-                "address": d_fields["addr"].get().strip() or None,
-                "zone": int(zone_val) if zone_val else None,
-                "role": d_fields["role"].get()
-            }
-            
-            def run():
-                return fc.create_meter_reader(payload, admin["name"])
-                
-            def success(uid_res):
-                messagebox.showinfo("Success", f"User registered successfully. Auth UID:\n{uid_res}", parent=dlg)
-                dlg.destroy()
-                load_readers()
-                
-            def fail(err):
-                messagebox.showerror("Registration Error", f"Failed saving user to Firebase:\n{err}", parent=dlg)
-                
-            utils.run_in_thread(run, callback=success, error_callback=fail, widget=dlg)
-            
-        ttk.Button(f_dlg, text="🚀 Save User Profile", command=save).grid(row=r, column=1, sticky="w", pady=15)
-        
-    ttk.Button(left_panel, text="➕ Register New Reader", command=open_new_reader_dialog).pack(pady=10)
-    
-    # Load initial list
-    load_readers()
-    
-    return frame
+    def reset_password(self):
+        if not self.current_reader: return
+        dlg = QDialog(self); dlg.setWindowTitle("Reset Password"); lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"Enter new password for {self.current_reader['name']}:"))
+        pwd_input = QLineEdit(); pwd_input.setEchoMode(QLineEdit.Password); lay.addWidget(pwd_input)
+        btn = QPushButton("Reset"); btn.clicked.connect(lambda: self.do_reset(dlg, pwd_input.text().strip())); lay.addWidget(btn)
+        dlg.exec()
+
+    def do_reset(self, dlg, pwd):
+        if len(pwd) < 6: return QMessageBox.warning(dlg, "Error", "Min 6 chars.")
+        self.utils.run_in_thread(lambda: self.fc.reset_meter_reader_password(self.current_reader["uid"], pwd, self.admin_ctx["name"]),
+                                 callback=lambda _: [QMessageBox.information(self, "Success", "Reset done."), dlg.accept()])
+
+    def open_new_reader_dialog(self):
+        NewReaderDialog(self, self.fc, self.utils, self.admin_ctx, self.load_readers).exec()
+
+class NewReaderDialog(QDialog):
+    def __init__(self, parent, fc, utils, admin_ctx, success_cb):
+        super().__init__(parent)
+        self.fc = fc; self.utils = utils; self.admin_ctx = admin_ctx; self.success_cb = success_cb
+        self.setWindowTitle("Register New Meter Reader")
+        self.setup_ui()
+
+    def setup_ui(self):
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        self.f_name = QLineEdit(); self.f_emp_id = QLineEdit(); self.f_user = QLineEdit()
+        pwd_chars = string.ascii_letters + string.digits + "!@#$"; self.gen_pwd = "".join(random.choice(pwd_chars) for _ in range(10))
+        self.f_pwd = QLineEdit(self.gen_pwd)
+        copy_btn = QPushButton("📋 Copy Password"); copy_btn.clicked.connect(lambda: [QApplication.clipboard().setText(self.f_pwd.text()), QMessageBox.information(self, "Copied", "Password copied!")])
+        self.f_phone = QLineEdit(); self.f_desig = QLineEdit(); self.f_addr = QLineEdit()
+        self.f_zone = QComboBox(); self.f_zone.addItems([""] + [str(z) for z in self.utils.ZONE_RANGE])
+        self.f_role = QComboBox(); self.f_role.addItems(self.utils.READER_ROLE_OPTIONS); self.f_role.setCurrentText("Reader")
+        for l, w in [("Name:*", self.f_name), ("Employee ID:*", self.f_emp_id), ("Username:*", self.f_user), ("Temp Pwd:*", self.f_pwd), ("", copy_btn), ("Phone:", self.f_phone), ("Designation:", self.f_desig), ("Address:", self.f_addr), ("Zone Filter:", self.f_zone), ("Role:*", self.f_role)]: form.addRow(l, w)
+        lay.addLayout(form)
+        save_btn = QPushButton("🚀 Save User Profile"); save_btn.clicked.connect(self.save); lay.addWidget(save_btn)
+
+    def save(self):
+        data = {"name": self.f_name.text().strip(), "employee_id": self.f_emp_id.text().strip(), "username": self.f_user.text().strip(), "password": self.f_pwd.text().strip(),
+                "phone_number": self.f_phone.text().strip() or None, "designation": self.f_desig.text().strip() or None, "address": self.f_addr.text().strip() or None,
+                "zone": int(self.f_zone.currentText()) if self.f_zone.currentText() else None, "role": self.f_role.currentText()}
+        if not all([data["name"], data["employee_id"], data["username"], data["password"]]): return QMessageBox.warning(self, "Error", "Required fields empty.")
+        self.utils.run_in_thread(lambda: self.fc.create_meter_reader(data, self.admin_ctx["name"]), callback=lambda uid: [QMessageBox.information(self, "Success", f"Registered: {uid}"), self.success_cb(), self.accept()])
