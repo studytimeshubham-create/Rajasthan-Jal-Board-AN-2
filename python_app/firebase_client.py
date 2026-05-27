@@ -7,6 +7,30 @@ from firebase_admin import firestore, auth
 firebase_config.get_firebase_app()
 db = firestore.client()
 
+def _to_date(ts):
+    """
+    Safely convert any Firestore timestamp representation to a Python date object.
+
+    Handles three cases:
+    - str: ISO format date string → parse with fromisoformat
+    - DatetimeWithNanoseconds (google.cloud.firestore): has .date() method → call it
+    - Firestore Timestamp (has .seconds attr): convert via utcfromtimestamp
+    - None: return None gracefully
+    - Fallback: coerce to str and try fromisoformat
+    """
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        # Handle cases like '2025-03-15T10:00:00Z' or just '2025-03-15'
+        if "T" in ts:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+        return datetime.fromisoformat(ts).date()
+    if hasattr(ts, 'date') and callable(ts.date):
+        return ts.date()                                          # DatetimeWithNanoseconds
+    if hasattr(ts, 'seconds'):
+        return datetime.utcfromtimestamp(ts.seconds).date()      # raw Timestamp proto
+    return datetime.fromisoformat(str(ts)).date()                 # last resort
+
 # Data Cache
 _cache = {}
 
@@ -847,17 +871,40 @@ def update_charges_config(new_rates: dict, admin_name: str, note: str) -> None:
     write_audit_log("UPDATE_CHARGES_CONFIG", admin_name, "charges_config/current", old_rates, new_rates)
 
 def apply_annual_increment(admin_name: str) -> None:
-    """Increments all numeric values inside charges_config by 10% (x1.10)."""
-    current_rates = get_charges_config()
-    updated_rates = {}
-    
-    for k, v in current_rates.items():
-        if isinstance(v, (int, float)) and not k.endswith("date") and not k.endswith("by"):
-            updated_rates[k] = round(v * 1.10, 2)
-        else:
-            updated_rates[k] = v
-            
-    update_charges_config(updated_rates, admin_name, "Annual 10% tariff increment applied.")
+    """
+    Multiplies all tariff rate fields in charges_config/current by 1.10.
+    Skips all keys starting with 'sewerage_' — sewerage rates are department-set
+    and are not subject to the annual tariff increment.
+    Saves a history snapshot before applying. Writes audit log.
+    """
+    config_ref = db.collection("charges_config").document("current")
+    current    = config_ref.get().to_dict()
+
+    # Save history snapshot before any change
+    history_ref = db.collection("charges_config_history").document()
+    history_ref.set({
+        "snapshot_before": current,
+        "changed_by":      admin_name,
+        "changed_at":      firestore.SERVER_TIMESTAMP,
+        "admin_note":      "Annual 10% increment applied",
+    })
+
+    # Build the update dict — skip sewerage keys
+    updates = {}
+    for key, value in current.items():
+        if key.startswith("sewerage_"):
+            continue                        # ← new: sewerage rates excluded
+        if isinstance(value, (int, float)):
+            updates[key] = round(value * 1.10, 4)
+
+    config_ref.update(updates)
+    write_audit_log(
+        action_type   = "ANNUAL_INCREMENT",
+        performed_by  = admin_name,
+        target_doc    = "charges_config/current",
+        old_value     = {k: current[k] for k in updates},
+        new_value     = updates,
+    )
 
 def get_charges_config_history() -> list:
     """Fetches charges modification historical logs."""
@@ -1122,21 +1169,9 @@ def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
         
         filtered = []
         for r in results:
-            ts = r.get("timestamp")
-            if ts:
-                if hasattr(ts, "to_datetime"):
-                    r_date = ts.to_datetime().date()
-                elif isinstance(ts, (datetime, date)):
-                    r_date = ts if isinstance(ts, date) else ts.date()
-                else:
-                    try:
-                        # Attempt to parse as string if it's not a known date/timestamp type
-                        r_date = datetime.fromisoformat(str(ts)).date()
-                    except (ValueError, TypeError):
-                        continue
-                    
-                if d_from <= r_date <= d_to:
-                    filtered.append(r)
+            r_date = _to_date(r.get("timestamp"))
+            if r_date and d_from <= r_date <= d_to:
+                filtered.append(r)
         results = filtered
         
     # Sort by timestamp desc
@@ -1144,12 +1179,20 @@ def get_audit_log(filters: dict = None, use_cache: bool = True) -> list:
         ts = x.get("timestamp")
         if not ts:
             return datetime.min
+
+        # Try to convert to datetime for sorting
         if isinstance(ts, datetime):
             return ts
         if hasattr(ts, "to_datetime"):
             return ts.to_datetime()
+        if hasattr(ts, "seconds"):
+            return datetime.utcfromtimestamp(ts.seconds)
+
         try:
-            return datetime.fromisoformat(str(ts))
+            s = str(ts)
+            if "T" in s:
+                return datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return datetime.fromisoformat(s)
         except:
             return datetime.min
         

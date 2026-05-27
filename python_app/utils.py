@@ -41,6 +41,7 @@ UI_COLORS = {
 
 # Constants
 WATER_SUPPLY_TYPE_OPTIONS = ["PHED", "Own Supply"]
+READER_ROLE_OPTIONS       = ["Reader", "Cashier"]
 
 SEWERAGE_SUB_CATEGORY_OPTIONS = [
     "Hotel",
