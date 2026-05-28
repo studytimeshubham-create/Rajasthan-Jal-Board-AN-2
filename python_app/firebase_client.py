@@ -1236,6 +1236,43 @@ def get_meter_reader_activity(date_from, date_to, reader_uid=None, zone=None) ->
     results.sort(key=lambda x: parse_date(x.get("reading_date")), reverse=True)
     return results
 
+def get_dashboard_stats() -> dict:
+    """Aggregates system-wide stats for the admin dashboard."""
+    active_c = list_consumers({"is_active": True})
+    open_cycles = get_open_cycles()
+    pending_q = get_pending_correction_queries()
+
+    # Calculate totals
+    total_outstanding = sum(float(c.get("outstanding_balance", 0.0)) for c in active_c)
+
+    # Collected this month
+    today = date.today()
+    this_month_payments = list_payments()
+    monthly_total = 0.0
+    for p in this_month_payments:
+        try:
+            from utils import parse_date
+            p_date = parse_date(p.get("payment_date", ""))
+            if p_date.month == today.month and p_date.year == today.year:
+                monthly_total += float(p.get("amount", 0.0))
+        except: pass
+
+    # Pending readings in active cycles
+    pending_readings = 0
+    for cycle in open_cycles:
+        readings_logged = len(get_readings_for_cycle(cycle["cycle_id"]))
+        tot_active_in_cycle = sum(cycle.get("consumer_count_per_zone", {}).values())
+        pending_readings += max(0, tot_active_in_cycle - readings_logged)
+
+    return {
+        "consumers": len(active_c),
+        "cycles": len(open_cycles),
+        "pending_readings": pending_readings,
+        "pending_queries": len(pending_q),
+        "outstanding": total_outstanding,
+        "collected": monthly_total
+    }
+
 def get_billing_summary(cycle_id: str) -> dict:
     """Calculates summary KPIs for a specific billing cycle."""
     readings = get_readings_for_cycle(cycle_id)

@@ -243,7 +243,8 @@ def _style_excel_header(ws, headers):
     ws.row_dimensions[1].height = 25
 
 def get_excel_template_consumers() -> bytes:
-    """Returns openpyxl Excel bytes with headers and a demo row for Consumer bulk upload."""
+    """Returns openpyxl Excel bytes with headers and demo rows for Consumer bulk upload."""
+    from openpyxl.worksheet.datavalidation import DataValidation
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bulk Create Consumers"
@@ -252,16 +253,40 @@ def get_excel_template_consumers() -> bytes:
         "cin_no", "name", "zone", "contact_number", "category", "meter_size", 
         "meter_serial_no", "initial_meter_reading", "address_longitude", 
         "address_latitude", "address_pin_code", "address_area_location", 
-        "address_landmark", "aadhaar_phed_no", "apl_bpl", "consumer_status"
+        "address_landmark", "aadhaar_phed_no", "apl_bpl",
+        "water_supply_type", "has_sewer_connection", "sewerage_sub_category", "num_rooms", "plot_area_sqmtr",
+        "consumer_status"
     ]
     _style_excel_header(ws, headers)
     
-    demo_row = [
-        "RJB-0000001", "Shubham Gupta", 1, 9876543210, "Domestic", "15mm",
-        "MS-98218A", 150.5, 75.806, 26.915, 302001, "Malviya Nagar",
-        "Near PHED Office", "1234-5678-9012", "APL", "Active"
+    # Example 1: PHED
+    row1 = [
+        "RJB-0000001", "PHED Example", 1, 9876543210, "Domestic", "15mm",
+        "MS-PHED-1", 150.5, 75.806, 26.915, 302001, "Malviya Nagar",
+        "Near PHED Office", "1234-5678-9012", "APL",
+        "PHED", True, "", "", "",
+        "Active"
     ]
-    ws.append(demo_row)
+    ws.append(row1)
+
+    # Example 2: Own Supply Hotel
+    row2 = [
+        "RJB-0000002", "Own Supply Hotel", 1, 9876543211, "Non-Domestic", "25mm",
+        "MS-OWN-2", 0.0, 75.807, 26.916, 302002, "C-Scheme",
+        "Opposite Park", "1234-5678-9013", "APL",
+        "Own Supply", True, "Hotel", 10, "",
+        "Active"
+    ]
+    ws.append(row2)
+
+    # Data Validations
+    dv_supply = DataValidation(type="list", formula1='"PHED,Own Supply"', allow_blank=False)
+    ws.add_data_validation(dv_supply)
+    dv_supply.add("P2:P1000") # water_supply_type column
+
+    dv_sewer = DataValidation(type="list", formula1='"TRUE,FALSE"', allow_blank=False)
+    ws.add_data_validation(dv_sewer)
+    dv_sewer.add("Q2:Q1000") # has_sewer_connection column
     
     # Auto-fit columns
     for col in ws.columns:
