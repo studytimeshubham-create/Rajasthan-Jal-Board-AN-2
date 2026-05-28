@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QMessageBox,
     QDialog, QProgressBar, QListWidget, QLineEdit, QRadioButton, QButtonGroup,
-    QFileDialog, QFrame, QAbstractItemView, QFormLayout
+    QFileDialog, QFrame, QAbstractItemView, QFormLayout, QComboBox
 )
 from PySide6.QtCore import Qt, Slot, QTimer
 
@@ -154,7 +154,8 @@ class InitiateCycleTab(QWidget):
     def initiate(self):
         zones = [int(i.text().split()[1]) for i in self.zone_list.selectedItems() if "(Active)" not in i.text()]
         if not zones or not self.f_end.text(): return QMessageBox.warning(self, "Error", "Fill all fields.")
-        lp_str = self.l_pay.text().split(": ")[1]
+        try: lp_str = self.l_pay.text().split(": ")[1]
+        except: return QMessageBox.warning(self, "Error", "Invalid date.")
         data = {"zones": zones, "start_date": self.f_start.text(), "end_date": self.f_end.text(), "last_payment_date": lp_str, "grace_period_months": self.grace_group.checkedId()}
         if QMessageBox.question(self, "Confirm", f"Initiate for {zones}?") == QMessageBox.Yes:
             self.utils.run_in_thread(lambda: self.fc.create_billing_cycle(data, self.admin_ctx["name"]),
@@ -195,11 +196,23 @@ class PrintCSDTab(QWidget):
             cons = self.fc.list_consumers({"zone": int(z), "is_active": True})
             tmpl = self.utils.load_pdf_template("csd_sheet"); combined = ""
             for i, c in enumerate(cons):
+                c_rows = "".join([f"<tr><td>{k}</td><td colspan='3'>{v}</td></tr>" for k, v in c.get("custom_attributes", {}).items()])
                 h = tmpl.replace("{{cin_no}}", c["cin_no"]).replace("{{name}}", c["name"]).replace("{{zone}}", str(c["zone"]))\
                         .replace("{{category}}", c["category"]).replace("{{meter_size}}", c["meter_size"])\
-                        .replace("{{meter_serial_no}}", c.get("meter_serial_no") or "").replace("{{last_reading}}", f"{c.get('last_reading', 0):.2f}")\
+                        .replace("{{meter_serial_no}}", c.get("meter_serial_no") or "")\
+                        .replace("{{contact_number}}", str(c.get("contact_number") or ""))\
+                        .replace("{{aadhaar_phed_no}}", c.get("aadhaar_phed_no") or "")\
+                        .replace("{{consumer_status}}", c.get("consumer_status", "Active"))\
+                        .replace("{{last_reading}}", f"{c.get('last_reading', 0.0):.2f}")\
+                        .replace("{{apl_bpl}}", c.get("apl_bpl", "APL"))\
+                        .replace("{{address}}", c.get("address_area_location", ""))\
+                        .replace("{{address_landmark}}", c.get("address_landmark", ""))\
+                        .replace("{{address_pin_code}}", str(c.get("address_pin_code") or ""))\
+                        .replace("{{address_latitude}}", str(c.get("address_latitude") or "0.00"))\
+                        .replace("{{address_longitude}}", str(c.get("address_longitude") or "0.00"))\
                         .replace("{{print_date}}", datetime.now().strftime("%d-%m-%Y"))\
-                        .replace("{{cycle_period}}", f"{cycle_data.get('start_date')} to {cycle_data.get('end_date')}")
+                        .replace("{{cycle_period}}", f"{cycle_data.get('start_date')} to {cycle_data.get('end_date')}")\
+                        .replace("{{custom_attributes_rows}}", c_rows)
                 if i < len(cons) - 1: h = h.replace("</body>", "<div style='page-break-after: always;'></div></body>")
                 combined += h
             path = os.path.join(os.getcwd(), f"CSD_{cid}_Z{z}.pdf")

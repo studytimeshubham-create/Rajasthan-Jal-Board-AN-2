@@ -152,11 +152,35 @@ class LPSWaiverTab(QWidget):
 class CreditBalanceTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
         super().__init__(parent); self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx; self.setup_ui()
+
     def setup_ui(self):
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("<b>Credit Balance Adjustments</b>"))
+        layout = QHBoxLayout(self)
+        left = QVBoxLayout(); right = QVBoxLayout(); layout.addLayout(left, 1); layout.addLayout(right, 2)
+
+        left.addWidget(QLabel("<b>Credit Adjustments</b>"))
         self.f_cin = QLineEdit(); self.f_amt = QLineEdit(); self.f_note = QTextEdit()
-        lay = QFormLayout(); lay.addRow("CIN:", self.f_cin); lay.addRow("Adjustment Amount:", self.f_amt); lay.addRow("Reason:", self.f_note); layout.addLayout(lay)
-        btn = QPushButton("🪙 Save Adjustment"); btn.clicked.connect(self.save); layout.addWidget(btn); layout.addStretch()
+        lay = QFormLayout(); lay.addRow("CIN:", self.f_cin); lay.addRow("Amount:", self.f_amt); lay.addRow("Reason:", self.f_note); left.addLayout(lay)
+        btn = QPushButton("🪙 Save Adjustment"); btn.clicked.connect(self.save); left.addWidget(btn); left.addStretch()
+
+        right.addWidget(QLabel("<b>Adjustment History</b>"))
+        self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["Date", "Type", "Reason", "Amount"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); right.addWidget(self.table)
+
+        self.f_cin.textChanged.connect(self.refresh_hist)
+
+    def refresh_hist(self):
+        cin = self.f_cin.text().strip()
+        if len(cin) < 4: return
+        def done(adjs):
+            self.table.setRowCount(0)
+            for a in adjs:
+                row = self.table.rowCount(); self.table.insertRow(row)
+                for i, v in enumerate([self.utils.format_date(a.get("applied_at")), a["type"], a["reason_note"], self.utils.format_currency(a["amount"])]):
+                    self.table.setItem(row, i, QTableWidgetItem(str(v)))
+        self.utils.run_in_thread(lambda: self.fc.get_adjustments_for_consumer(cin), callback=done)
+
     def save(self):
-        def run(): self.fc.add_custom_adjustment(self.f_cin.text().strip(), "waiver", float(self.f_amt.text()), self.f_note.toPlainText().strip(), self.admin_ctx["name"])
-        self.utils.run_in_thread(run, callback=lambda _: QMessageBox.information(self, "Success", "Adjustment saved."))
+        cin, amt, note = self.f_cin.text().strip(), self.f_amt.text(), self.f_note.toPlainText().strip()
+        if not all([cin, amt, note]): return QMessageBox.warning(self, "Error", "Fill all.")
+        self.utils.run_in_thread(lambda: self.fc.add_custom_adjustment(cin, "waiver", float(amt), note, self.admin_ctx["name"]),
+                                 callback=lambda _: [QMessageBox.information(self, "Success", "Saved."), self.refresh_hist()])

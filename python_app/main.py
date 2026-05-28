@@ -7,7 +7,7 @@ from datetime import datetime, date
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QStackedWidget, QDialog, QLineEdit, QMessageBox, QFrame,
-    QGridLayout, QStatusBar, QSpacerItem, QSizePolicy
+    QGridLayout, QStatusBar, QSpacerItem, QSizePolicy, QGroupBox, QFormLayout
 )
 from PySide6.QtGui import QFontDatabase, QFont, QIcon
 from PySide6.QtCore import Qt, QTimer, Slot
