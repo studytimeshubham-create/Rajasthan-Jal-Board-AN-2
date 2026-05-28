@@ -1,10 +1,16 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import sys
+import os
 import hashlib
 import json
-import os
 import time
 from datetime import datetime, date
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QStackedWidget, QDialog, QLineEdit, QMessageBox, QFrame,
+    QGridLayout, QStatusBar, QSpacerItem, QSizePolicy
+)
+from PySide6.QtGui import QFontDatabase, QFont, QIcon
+from PySide6.QtCore import Qt, QTimer, Slot
 
 # Import configurations & client
 import firebase_config
@@ -14,518 +20,161 @@ import billing_engine as be
 
 CREDENTIALS_FILE = "admin_credentials.json"
 
-class AdminApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Rajasthan Jal Board — Admin Console")
-        self.root.geometry("1100x700")
-        self.root.minsize(1000, 600)
-        self.root.withdraw() # Hide until authenticated
-        
-        # Apply Segoe UI font theme
-        self.root.option_add("*Font", ("Segoe UI", 10))
-        
-        # Configure styles
-        self.style = ttk.Style()
-        self.style.theme_use("clam")
+def _load_fonts(app: QApplication) -> None:
+    """Load JetBrains Mono from bundled TTF files in assets/fonts/."""
+    for weight in ["Regular", "Bold", "Medium", "Italic", "BoldItalic"]:
+        path = f"assets/fonts/JetBrainsMono-{weight}.ttf"
+        if os.path.exists(path):
+            QFontDatabase.addApplicationFont(path)
+    app.setFont(QFont("JetBrains Mono", 10))
 
-        c = utils.UI_COLORS
-        self.root.configure(bg=c["canvas"])
+def _load_stylesheet(app: QApplication) -> None:
+    """Load QSS from assets/style.qss."""
+    try:
+        with open("assets/style.qss", "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    except FileNotFoundError:
+        pass
 
-        self.style.configure(".", font=("Segoe UI", 10), background=c["canvas"], foreground=c["ink"])
-        self.style.configure("TFrame", background=c["canvas"])
-        self.style.configure("TLabel", font=("Segoe UI", 10), background=c["canvas"], foreground=c["ink"])
+class LoginDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Admin Authenticate")
+        self.setFixedSize(400, 350); self.failed_attempts = 0; self.lockout_until = 0; self.admin_name = ""
+        self.setup_ui()
 
-        self.style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"), foreground=c["primary"])
-        self.style.configure("Title.TLabel", font=("Copernicus", 22), foreground=c["ink"]) # Tiempos/Copernicus feel
+    def setup_ui(self):
+        self.setObjectName("login_dialog")
+        layout = QVBoxLayout(self); layout.setContentsMargins(40, 40, 40, 40)
+        title = QLabel("RAJASTHAN JAL BOARD"); title.setAlignment(Qt.AlignCenter); title.setStyleSheet("font-size: 18px; font-weight: bold")
+        layout.addWidget(title)
 
-        self.style.configure("Sidebar.TFrame", background=c["surface_dark"])
-        self.style.configure("Sidebar.TLabel", background=c["surface_dark"], foreground=c["on_dark"])
-        self.style.configure("Sidebar.TButton",
-            font=("Segoe UI", 10, "bold"),
-            anchor="w",
-            padding=10,
-            background=c["surface_dark"],
-            foreground=c["on_dark_soft"],
-            borderwidth=0
-        )
-        self.style.map("Sidebar.TButton",
-            background=[("active", c["surface_dark_elevated"]), ("pressed", c["surface_dark_soft"])],
-            foreground=[("active", c["on_dark"]), ("pressed", c["on_dark"])]
-        )
+        self.u_input = QLineEdit(); self.u_input.setPlaceholderText("Username")
+        self.p_input = QLineEdit(); self.p_input.setPlaceholderText("Password"); self.p_input.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.u_input); layout.addWidget(self.p_input)
 
-        self.style.configure("Card.TFrame", background=c["surface_card"], borderwidth=1, relief="flat")
-        self.style.configure("KPI.TLabel", font=("Copernicus", 18, "bold"), background=c["surface_card"], foreground=c["primary"])
-        self.style.configure("KPITitle.TLabel", font=("Segoe UI", 9, "bold"), background=c["surface_card"], foreground=c["muted"])
+        self.msg_lbl = QLabel(""); self.msg_lbl.setStyleSheet("color: red"); layout.addWidget(self.msg_lbl)
 
-        self.style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=8)
-        self.style.configure("Primary.TButton", background=c["primary"], foreground=c["on_primary"])
-        self.style.map("Primary.TButton", background=[("active", c["primary_active"])])
-        
-        # Lockout tracking
-        self.failed_attempts = 0
-        self.lockout_until = 0
-        self.logged_in_admin = "Admin"
-        
-        # Initialize UI layout frames
-        self.sidebar_frame = None
-        self.content_frame = None
-        self.status_bar = None
-        self.current_frame = None
-        self.nav_buttons = {}
-        
-        # Check first-run credentials setup
-        self.check_credentials_setup()
+        btn = QPushButton("AUTHENTICATE"); btn.clicked.connect(self.attempt_login); layout.addWidget(btn)
 
-    def check_credentials_setup(self):
-        if not os.path.exists(CREDENTIALS_FILE):
-            self.show_setup_dialog()
+        self.timer = QTimer(); self.timer.timeout.connect(self.update_lockout); self.timer.start(1000)
+
+    def update_lockout(self):
+        if self.lockout_until > time.time():
+            self.msg_lbl.setText(f"Lockout: {int(self.lockout_until - time.time())}s remaining")
+        elif self.failed_attempts >= 5: self.msg_lbl.setText("")
+
+    def attempt_login(self):
+        if time.time() < self.lockout_until: return
+        u, p = self.u_input.text().strip(), self.p_input.text()
+        if not os.path.exists(CREDENTIALS_FILE): return self.show_setup()
+        with open(CREDENTIALS_FILE, "r") as f: creds = json.load(f)
+        if u == creds["username"] and hashlib.sha256(p.encode()).hexdigest() == creds["password_hash"]:
+            self.admin_name = creds["name"]; self.accept()
         else:
-            # Small delay to ensure root is withdrawn before dialog pops
-            self.root.after(100, self.show_login_dialog)
+            self.failed_attempts += 1
+            if self.failed_attempts >= 5: self.lockout_until = time.time() + 30
+            self.msg_lbl.setText(f"Invalid. Attempt {self.failed_attempts}/5")
 
-    def show_setup_dialog(self):
-        setup_win = tk.Toplevel(self.root)
-        setup_win.title("First-Run Admin Setup")
-        setup_win.geometry("400x300")
-        setup_win.resizable(False, False)
-        setup_win.grab_set()
-        
-        # Center the window
-        setup_win.update_idletasks()
-        w = setup_win.winfo_width()
-        h = setup_win.winfo_height()
-        x = (setup_win.winfo_screenwidth() // 2) - (w // 2)
-        y = (setup_win.winfo_screenheight() // 2) - (h // 2)
-        setup_win.geometry(f"+{x}+{y}")
-        
-        ttk.Label(setup_win, text="Setup Admin Account", font=("Segoe UI", 14, "bold"), foreground="#1a3a6b").pack(pady=15)
-        
-        f = ttk.Frame(setup_win)
-        f.pack(pady=10, padx=20, fill="x")
+    def show_setup(self):
+        dlg = QDialog(self); dlg.setWindowTitle("Setup Admin"); lay = QVBoxLayout(dlg)
+        f = QFormLayout(); name = QLineEdit("Admin"); user = QLineEdit("admin"); pwd = QLineEdit(); pwd.setEchoMode(QLineEdit.Password)
+        f.addRow("Name:", name); f.addRow("User:", user); f.addRow("Pass:", pwd); lay.addLayout(f)
+        btn = QPushButton("Create"); lay.addWidget(btn)
+        def save():
+            if not name.text() or not user.text() or not pwd.text(): return
+            with open(CREDENTIALS_FILE, "w") as f_out: json.dump({"name": name.text(), "username": user.text(), "password_hash": hashlib.sha256(pwd.text().encode()).hexdigest()}, f_out)
+            QMessageBox.information(dlg, "Success", "Account created."); dlg.accept()
+        btn.clicked.connect(save); dlg.exec()
 
-        
-        ttk.Label(f, text="Admin Name:").grid(row=0, column=0, sticky="w", pady=5)
-        name_ent = ttk.Entry(f, width=25)
-        name_ent.grid(row=0, column=1, pady=5)
-        name_ent.insert(0, "Administrator")
-        
-        ttk.Label(f, text="Username:").grid(row=1, column=0, sticky="w", pady=5)
-        user_ent = ttk.Entry(f, width=25)
-        user_ent.grid(row=1, column=1, pady=5)
-        user_ent.insert(0, "admin")
-        
-        ttk.Label(f, text="Password:").grid(row=2, column=0, sticky="w", pady=5)
-        pass_ent = ttk.Entry(f, show="*", width=25)
-        pass_ent.grid(row=2, column=1, pady=5)
-        
-        ttk.Label(f, text="Confirm Password:").grid(row=3, column=0, sticky="w", pady=5)
-        conf_ent = ttk.Entry(f, show="*", width=25)
-        conf_ent.grid(row=3, column=1, pady=5)
-        
-        def save_creds():
-            name = name_ent.get().strip()
-            username = user_ent.get().strip()
-            p1 = pass_ent.get()
-            p2 = conf_ent.get()
-            
-            if not name or not username or not p1:
-                messagebox.showerror("Error", "All fields are required.", parent=setup_win)
-                return
-            if p1 != p2:
-                messagebox.showerror("Error", "Passwords do not match.", parent=setup_win)
-                return
-                
-            creds = {
-                "name": name,
-                "username": username,
-                "password_hash": hashlib.sha256(p1.encode()).hexdigest()
-            }
-            with open(CREDENTIALS_FILE, "w") as file:
-                json.dump(creds, file)
-                
-            messagebox.showinfo("Success", "Admin account created successfully! Please login.", parent=setup_win)
-            setup_win.destroy()
-            self.show_login_dialog()
-            
-        ttk.Button(setup_win, text="Create Account", command=save_creds).pack(pady=15)
-        setup_win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy())
+class MainWindow(QMainWindow):
+    def __init__(self, fc, utils, be, admin_ctx):
+        super().__init__()
+        self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx
+        self.setWindowTitle("Rajasthan Jal Board — Admin Console")
+        self.setup_ui()
 
-    def show_login_dialog(self):
-        login_win = tk.Toplevel(self.root)
-        login_win.title("Admin Authenticate")
-        login_win.geometry("400x350")
-        login_win.resizable(False, False)
-        login_win.grab_set()
-        
-        c = utils.UI_COLORS
-        login_win.configure(bg=c["surface_dark"])
+    def setup_ui(self):
+        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root)
+        layout = QHBoxLayout(root); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
 
-        # Center
-        login_win.update_idletasks()
-        w = login_win.winfo_width()
-        h = login_win.winfo_height()
-        x = (login_win.winfo_screenwidth() // 2) - (w // 2)
-        y = (login_win.winfo_screenheight() // 2) - (h // 2)
-        login_win.geometry(f"+{x}+{y}")
-        
-        ttk.Label(login_win, text="RAJASTHAN JAL BOARD", font=("Copernicus", 16, "bold"), style="Sidebar.TLabel").pack(pady=(30, 5))
-        ttk.Label(login_win, text="Admin Console Login", font=("Segoe UI", 10), style="Sidebar.TLabel").pack(pady=(0, 20))
-        
-        f = ttk.Frame(login_win, style="Sidebar.TFrame")
-        f.pack(pady=10, padx=40, fill="x")
+        self.sidebar = QWidget(); self.sidebar.setObjectName("sidebar"); self.sidebar.setFixedWidth(200)
+        layout.addWidget(self.sidebar)
 
-        ttk.Label(f, text="Username", style="Sidebar.TLabel").pack(anchor="w")
-        user_ent = ttk.Entry(f)
-        user_ent.pack(fill="x", pady=(5, 15))
-        user_ent.focus()
-        
-        ttk.Label(f, text="Password", style="Sidebar.TLabel").pack(anchor="w")
-        pass_ent = ttk.Entry(f, show="*")
-        pass_ent.pack(fill="x", pady=(5, 15))
-        
-        status_lbl = ttk.Label(login_win, text="", style="Sidebar.TLabel")
-        status_lbl.pack()
-        
-        def attempt_login(event=None):
-            # Check lockout
-            if time.time() < self.lockout_until:
-                remaining = int(self.lockout_until - time.time())
-                status_lbl.config(text=f"Too many failed attempts. Try in {remaining}s.")
-                return
-                
-            username = user_ent.get().strip()
-            password = pass_ent.get()
-            
-            with open(CREDENTIALS_FILE, "r") as file:
-                creds = json.load(file)
-                
-            if username == creds.get("username") and hashlib.sha256(password.encode()).hexdigest() == creds.get("password_hash"):
-                # Success
-                self.logged_in_admin = creds.get("name", "Administrator")
-                
-                # Check Firebase connection
-                try:
-                    status_lbl.config(text="Connecting to Firebase...", foreground="#1a3a6b")
-                    login_win.update()
-                    # Trigger Firebase Admin initialization
-                    firebase_config.get_firebase_app()
-                    
-                    login_win.destroy()
-                    self.root.deiconify() # Show main window
-                    self.build_main_interface()
-                except Exception as ex:
-                    messagebox.showerror("Firebase Error", f"Failed to initialize Firebase Admin SDK:\n{ex}\n\nPlease place your 'serviceAccountKey.json' file in the directory.", parent=login_win)
-                    status_lbl.config(text="Firebase connection failed.", foreground="red")
-            else:
-                self.failed_attempts += 1
-                if self.failed_attempts >= 5:
-                    self.lockout_until = time.time() + 30
-                    self.failed_attempts = 0
-                    status_lbl.config(text="Lockout active for 30 seconds.")
-                else:
-                    status_lbl.config(text=f"Invalid credentials. Attempt {self.failed_attempts}/5.")
-        
-        btn = ttk.Button(login_win, text="AUTHENTICATE", command=attempt_login, style="Primary.TButton")
-        btn.pack(pady=20, padx=40, fill="x")
-        
-        login_win.bind("<Return>", attempt_login)
-        login_win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy())
+        side_lay = QVBoxLayout(self.sidebar); side_lay.setContentsMargins(8, 8, 8, 8); side_lay.setSpacing(4)
+        side_lay.addWidget(QLabel("Rajasthan Jal Board", styleSheet="font-weight: bold; font-size: 14px"))
+        side_lay.addWidget(QLabel("Admin Console", styleSheet="font-size: 10px; color: #a09d96"))
+        side_lay.addSpacing(8)
 
-    def build_main_interface(self):
-        # 1. Left Navigation Sidebar
-        self.sidebar_frame = ttk.Frame(self.root, padding=0, width=220, style="Sidebar.TFrame")
-        self.sidebar_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
-        
-        # Logo and branding in Sidebar
-        c = utils.UI_COLORS
-        logo_lbl = ttk.Label(self.sidebar_frame, text="💧 RJB Console", font=("Segoe UI", 14, "bold"), style="Sidebar.TLabel", padding=20)
-        logo_lbl.pack(fill="x", pady=(10, 20))
-        
-        # Navigation Items mapping (Display Name, Emoji, Module name)
-        self.menu_items = [
-            ("Dashboard", "🏠", "dashboard"),
-            ("Consumers", "👤", "consumers"),
-            ("Meter Readers", "👷", "meter_readers"),
-            ("Billing Cycles", "💳", "billing"),
-            ("Readings", "📖", "readings"),
-            ("Payments", "💰", "payments"),
-            ("Reports", "📈", "reports"),
-            ("Charges Config", "⚙️", "charges_config"),
-            ("Audit Log", "📋", "audit_log"),
-            ("Dark Mode", "🌙", "dark_mode")
-        ]
-        
-        for name, icon, mod in self.menu_items:
-            btn = ttk.Button(
-                self.sidebar_frame, 
-                text=f"  {icon}   {name.upper()}",
-                style="Sidebar.TButton",
-                command=lambda m=mod: self.show_page(m)
-            )
-            btn.pack(fill="x", pady=2)
-            self.nav_buttons[mod] = btn
-            
-        # 2. Right Content Frame
-        self.content_frame = ttk.Frame(self.root, padding=15)
-        self.content_frame.grid(row=0, column=1, sticky="nsew")
-        
-        # 3. Status Bar at Bottom
-        self.status_bar = ttk.Frame(self.root, padding=5, style="Sidebar.TFrame")
-        self.status_bar.grid(row=1, column=1, sticky="ew")
+        self.stack = QStackedWidget(); layout.addWidget(self.stack, 1)
 
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_rowconfigure(0, weight=1)
-        
-        admin_lbl = ttk.Label(self.status_bar, text=f"Logged in as: {self.logged_in_admin}  |  Connected to Firebase", font=("Segoe UI", 8), style="Sidebar.TLabel")
-        admin_lbl.pack(side="left", padx=10)
-        
-        date_lbl = ttk.Label(self.status_bar, text=datetime.now().strftime("%d-%m-%Y  %H:%M"), font=("Segoe UI", 8), style="Sidebar.TLabel")
-        date_lbl.pack(side="right", padx=10)
-        
-        # Set Sidebar selected look map
-        self.style.map("Sidebar.TButton",
-            background=[("pressed", c["primary"]), ("active", c["surface_dark_elevated"]), ("!disabled", c["surface_dark"])],
-            foreground=[("pressed", c["on_primary"]), ("active", c["on_dark"]), ("!disabled", c["on_dark_soft"])]
-        )
+        nav_items = [("Dashboard", "🏠"), ("Consumers", "👥"), ("Meter Readers", "👷"), ("Billing Cycles", "💳"), ("Readings", "📖"), ("Payments", "💰"), ("Reports", "📊"), ("Charges Config", "⚙️"), ("Audit Log", "📋")]
+        self.nav_btns = []
+        for i, (name, icon) in enumerate(nav_items):
+            btn = QPushButton(f"{icon} {name}"); btn.setObjectName("nav_item")
+            btn.clicked.connect(lambda _, idx=i: self.switch_page(idx))
+            side_lay.addWidget(btn); self.nav_btns.append(btn)
 
-        # Default Page -> Dashboard
-        self.show_page("dashboard")
+        side_lay.addStretch(); logout_btn = QPushButton("🔒 Logout"); logout_btn.clicked.connect(self.close); side_lay.addWidget(logout_btn)
 
-    def toggle_dark_mode(self):
-        # Placeholder for real theme switching logic
-        # For now we use the requested Claude theme which is already editorial
-        messagebox.showinfo("Theme", "System is already using the Editorial Claude Theme with warm canvas and dark-navy highlights.", parent=self.root)
+        # Add widgets to stack
+        self.stack.addWidget(DashboardWidget(self.fc, self.utils, self.admin_ctx, self))
+        import consumers, meter_readers, billing, readings, payments, reports, charges_config, audit_log
+        for mod in [consumers, meter_readers, billing, readings, payments, reports, charges_config, audit_log]:
+            self.stack.addWidget(mod.get_widget(self.stack, self.fc, self.utils, self.be, self.admin_ctx))
 
-    def show_page(self, page_name):
-        if page_name == "dark_mode":
-            self.toggle_dark_mode()
-            return
+        self.switch_page(0)
+        self.setStatusBar(QStatusBar()); self.statusBar().showMessage(f"Admin: {self.admin_ctx['name']}  |  {datetime.now().strftime('%d-%m-%Y')}")
 
-        # Update sidebar active highlighting
-        for name, btn in self.nav_buttons.items():
-            if name == page_name:
-                btn.state(["pressed"])
-            else:
-                btn.state(["!pressed"])
-                
-        # Destroy current frame contents
-        if self.current_frame:
-            self.current_frame.destroy()
-            
-        # Dynamically import and render view module
-        if page_name == "dashboard":
-            self.current_frame = self.get_dashboard_frame(self.content_frame)
-        else:
-            try:
-                mod = __import__(page_name)
-                admin_ctx = {"name": self.logged_in_admin}
-                self.current_frame = mod.get_frame(self.content_frame, fc, utils, be, admin_ctx)
-                if not self.current_frame:
-                    raise ImportError(f"Module {page_name} returned None frame")
-            except Exception as e:
-                # Fallback error frame
-                self.current_frame = ttk.Frame(self.content_frame)
-                ttk.Label(self.current_frame, text=f"Error loading module '{page_name}':\n{e}", foreground="red", font=("Segoe UI", 12)).pack(pady=50)
-                import traceback
-                traceback.print_exc()
-                
-        self.current_frame.grid(row=0, column=0, sticky="nsew")
-        self.content_frame.grid_columnconfigure(0, weight=1)
-        self.content_frame.grid_rowconfigure(0, weight=1)
+    def switch_page(self, idx):
+        self.stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self.nav_btns):
+            btn.setObjectName("nav_item_active" if i == idx else "nav_item")
+            btn.setStyle(btn.style()) # Force style update
 
-    # ----------------------------------------------------
-    # Embedded Dashboard View
-    # ----------------------------------------------------
-    def get_dashboard_frame(self, parent):
-        frame = ttk.Frame(parent, padding=30)
-        frame.grid_columnconfigure(0, weight=1)
+class DashboardWidget(QWidget):
+    def __init__(self, fc, utils, admin_ctx, parent_window):
+        super().__init__()
+        self.fc = fc; self.utils = utils; self.admin_ctx = admin_ctx; self.parent_window = parent_window
+        self.setup_ui()
+        self.refresh_stats()
+        self.timer = QTimer(self); self.timer.timeout.connect(self.refresh_stats); self.timer.start(300000)
 
-        # Title
-        title_frame = ttk.Frame(frame)
-        title_frame.grid(row=0, column=0, sticky="ew", pady=(0, 25))
-        ttk.Label(title_frame, text="Rajasthan Jal Board Dashboard", style="Title.TLabel").pack(side="left")
-        
-        # Refresh button
-        ref_btn = ttk.Button(title_frame, text="🔄 Refresh Dashboard", command=lambda: self.load_dashboard_data(use_cache=False), style="Primary.TButton")
-        ref_btn.pack(side="right")
-        
-        # Cards frame
-        self.cards_frame = ttk.Frame(frame)
-        self.cards_frame.grid(row=1, column=0, sticky="ew", pady=10)
-        
-        # Grid layout for KPI Cards
-        # We will create 6 cards
-        self.kpi_labels = {}
-        kpis = [
-            ("Total Active Consumers", "consumers_val", "👤", 0, 0),
-            ("Open Billing Cycles", "cycles_val", "💳", 0, 1),
-            ("Pending Readings", "readings_val", "📖", 0, 2),
-            ("Pending Queries", "queries_val", "⚠️", 1, 0),
-            ("Outstanding Balance", "outstanding_val", "💰", 1, 1),
-            ("Collected (This Month)", "collected_val", "📈", 1, 2)
-        ]
-        
-        for name, key, icon, r, c in kpis:
-            card = ttk.Frame(self.cards_frame, style="Card.TFrame", padding=20)
-            card.grid(row=r, column=c, sticky="nsew", padx=10, pady=10)
-            self.cards_frame.grid_columnconfigure(c, weight=1)
-            
-            ttk.Label(card, text=f"{icon}  {name.upper()}", style="KPITitle.TLabel").pack(anchor="w")
-            
-            val_lbl = ttk.Label(card, text="Loading...", style="KPI.TLabel")
-            val_lbl.pack(anchor="w", pady=(10, 0))
-            self.kpi_labels[key] = val_lbl
-            
-        # Alert frame for Pending Correction Queries (red/orange)
-        self.alert_frame = ttk.Frame(frame, padding=10)
-        self.alert_frame.grid(row=2, column=0, sticky="ew", pady=15)
-        
-        self.load_dashboard_data()
-        
-        return frame
+    def setup_ui(self):
+        layout = QVBoxLayout(self); layout.setContentsMargins(30, 30, 30, 30)
+        title = QLabel("Dashboard Summary"); title.setObjectName("page_title"); layout.addWidget(title)
 
-    def load_dashboard_data(self, use_cache=True):
-        # Update to Loading state
-        for lbl in self.kpi_labels.values():
-            if lbl.winfo_exists():
-                lbl.config(text="Querying...")
-            
-        def fetch_db_stats():
-            if not use_cache:
-                fc.clear_cache()
+        self.grid = QGridLayout(); layout.addLayout(self.grid)
+        self.kpi_cards = {}
+        kpis = [("Active Consumers", 0, 0), ("Open Cycles", 0, 1), ("Pending Readings", 0, 2), ("Pending Queries", 1, 0), ("Total Outstanding", 1, 1), ("Collected Month", 1, 2)]
+        for name, r, c in kpis:
+            card = QFrame(); card.setObjectName("card"); slay = QVBoxLayout(card)
+            slay.addWidget(QLabel(name.upper(), styleSheet="font-size: 10px; color: #6c6a64"))
+            val = QLabel("..."); val.setStyleSheet("font-size: 24px; font-weight: bold"); slay.addWidget(val)
+            self.grid.addWidget(card, r, c); self.kpi_cards[name] = val
 
-            # Consumers
-            active_c = len(fc.list_consumers({"is_active": True}, use_cache=use_cache))
-            
-            # Cycles & Readings
-            open_cycles = fc.get_open_cycles(use_cache=use_cache)
-            open_cycles_str = ", ".join([f"Zones {c['zones']}" for c in open_cycles]) if open_cycles else "None"
-            
-            pending_readings = 0
-            for cycle in open_cycles:
-                cycle_id = cycle["cycle_id"]
-                # Billed count vs total
-                for zone in cycle.get("zones", []):
-                    total_zone_c = cycle.get("consumer_count_per_zone", {}).get(str(zone), 0)
-                    readings_logged = len(fc.get_readings_for_cycle(cycle_id))
-                    # simple difference approximation
-                    zone_c_count = len(fc.list_consumers({"zone": zone, "is_active": True}))
-                    # Calculate true pending
-                    # (this is estimated quickly for dashboard)
-                    
-            # Better pending readings logic: count consumers in active zones minus readings count
-            active_zones = fc.get_open_cycle_zones()
-            tot_active_c = 0
-            for zone in active_zones:
-                tot_active_c += len(fc.list_consumers({"zone": zone, "is_active": True}))
-                
-            tot_readings = 0
-            for cycle in open_cycles:
-                tot_readings += len(fc.get_readings_for_cycle(cycle["cycle_id"]))
-                
-            pending_readings = max(0, tot_active_c - tot_readings)
-            
-            # Correction Queries
-            pending_q = fc.get_pending_correction_queries()
-            pending_q_count = len(pending_q)
-            
-            # Balances
-            # Outstanding
-            all_consumers = fc.list_consumers(use_cache=use_cache)
-            total_outstanding = sum(float(c.get("outstanding_balance", 0.0)) for c in all_consumers)
-            
-            # Payments this month
-            today = date.today()
-            this_month_payments = fc.list_payments() # Payments not currently cached, might add if needed
-            monthly_total = 0.0
-            for p in this_month_payments:
-                p_date = utils.parse_date(p.get("payment_date", ""))
-                if p_date.month == today.month and p_date.year == today.year:
-                    monthly_total += float(p.get("amount", 0.0))
-                    
-            return {
-                "consumers": active_c,
-                "cycles": len(open_cycles),
-                "cycles_detail": open_cycles_str,
-                "pending_readings": pending_readings,
-                "pending_queries": pending_q_count,
-                "outstanding": total_outstanding,
-                "collected": monthly_total
-            }
-            
-        def on_stats_fetched(stats):
-            self.kpi_labels["consumers_val"].config(text=str(stats["consumers"]))
-            
-            cycles_txt = f"{stats['cycles']} active"
-            if stats["cycles"] > 0:
-                self.kpi_labels["cycles_val"].config(text=cycles_txt, font=("Segoe UI", 12, "bold"))
-                ttk.ToolTip(self.kpi_labels["cycles_val"], stats["cycles_detail"])
-            else:
-                self.kpi_labels["cycles_val"].config(text="None", font=("Segoe UI", 18, "bold"))
-                
-            self.kpi_labels["readings_val"].config(text=str(stats["pending_readings"]))
-            
-            q_count = stats["pending_queries"]
-            q_lbl = self.kpi_labels["queries_val"]
-            q_lbl.config(text=str(q_count))
-            
-            c = utils.UI_COLORS
+        self.alert_box = QGroupBox("Action Required"); self.alert_box.setVisible(False); layout.addWidget(self.alert_box)
+        alay = QHBoxLayout(self.alert_box); self.alert_lbl = QLabel(""); alay.addWidget(self.alert_lbl)
+        go_btn = QPushButton("Go to Queries"); go_btn.clicked.connect(lambda: self.parent_window.switch_page(4)); alay.addWidget(go_btn)
+        layout.addStretch()
 
-            # Clear alerts
-            for widget in self.alert_frame.winfo_children():
-                widget.destroy()
-                
-            if q_count > 0:
-                q_lbl.config(foreground=c["error"])
-                # Show alert banner
-                banner = ttk.Frame(self.alert_frame, style="Card.TFrame", padding=10)
-                banner.pack(fill="x")
-                # Configure banner style
-                lbl = ttk.Label(banner, text=f"⚠️ CRITICAL: There are {q_count} pending correction queries requiring approval!", font=("Segoe UI", 11, "bold"), foreground="#c0392b")
-                lbl.pack(side="left")
-                
-                btn = ttk.Button(banner, text="Go to Readings Query Tab", command=lambda: self.show_page("readings"))
-                btn.pack(side="right")
-            else:
-                q_lbl.config(foreground=c["primary"])
-                
-            self.kpi_labels["outstanding_val"].config(text=utils.format_currency(stats["outstanding"]))
-            self.kpi_labels["collected_val"].config(text=utils.format_currency(stats["collected"]))
-            
-        def on_error(err):
-            for lbl in self.kpi_labels.values():
-                lbl.config(text="Error", foreground="red")
-            messagebox.showerror("Error", f"Failed to refresh dashboard stats:\n{err}")
-
-        utils.run_in_thread(fetch_db_stats, callback=on_stats_fetched, error_callback=on_error, widget=self.root)
-
-# Helper ToolTip class for Tkinter
-class ToolTip:
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tooltip = None
-        self.widget.bind("<Enter>", self.show_tooltip)
-        self.widget.bind("<Leave>", self.hide_tooltip)
-
-    def show_tooltip(self, event=None):
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
-        self.tooltip = tk.Toplevel(self.widget)
-        self.tooltip.wm_overrideredirect(True)
-        self.tooltip.wm_geometry(f"+{x}+{y}")
-        lbl = ttk.Label(self.tooltip, text=self.text, background="#ffffdd", relief="solid", borderwidth=1, font=("Segoe UI", 9), padding=4)
-        lbl.pack()
-
-    def hide_tooltip(self, event=None):
-        if self.tooltip:
-            self.tooltip.destroy()
-            self.tooltip = None
-ttk.ToolTip = ToolTip
+    def refresh_stats(self):
+        def done(s):
+            self.kpi_cards["Active Consumers"].setText(str(s["consumers"]))
+            self.kpi_cards["Open Cycles"].setText(str(s["cycles"]))
+            self.kpi_cards["Pending Readings"].setText(str(s["pending_readings"]))
+            self.kpi_cards["Pending Queries"].setText(str(s["pending_queries"]))
+            self.kpi_cards["Total Outstanding"].setText(self.utils.format_currency(s["outstanding"]))
+            self.kpi_cards["Collected Month"].setText(self.utils.format_currency(s["collected"]))
+            self.alert_box.setVisible(s["pending_queries"] > 0)
+            self.alert_lbl.setText(f"You have {s['pending_queries']} pending correction queries!")
+        self.utils.run_in_thread(self.fc.get_dashboard_stats, callback=done)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = AdminApp(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    _load_fonts(app); _load_stylesheet(app)
+    firebase_config.get_firebase_app()
+    login = LoginDialog()
+    if login.exec() == QDialog.Accepted:
+        win = MainWindow(fc, utils, be, {"name": login.admin_name})
+        win.showMaximized(); sys.exit(app.exec())

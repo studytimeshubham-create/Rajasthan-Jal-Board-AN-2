@@ -42,8 +42,7 @@ class ReadingsWidget(QWidget):
 
 class ViewReadingsTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
-        super().__init__(parent)
-        self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx
+        super().__init__(parent); self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx
         self.setup_ui()
 
     def setup_ui(self):
@@ -58,7 +57,8 @@ class ViewReadingsTab(QWidget):
         f_lay.addWidget(QLabel("Status:")); f_lay.addWidget(self.f_status)
         f_lay.addWidget(btn); f_lay.addStretch()
         exp_btn = QPushButton("📤 Export"); exp_btn.clicked.connect(self.do_export)
-        f_lay.addWidget(exp_btn); layout.addLayout(f_lay)
+        imp_btn = QPushButton("📥 Import Corrections"); imp_btn.clicked.connect(self.do_import)
+        f_lay.addWidget(exp_btn); f_lay.addWidget(imp_btn); layout.addLayout(f_lay)
 
         self.table = QTableWidget(0, 9); self.table.setHorizontalHeaderLabels(["Date", "CIN", "Reader", "Prev", "Curr", "Usage", "Bill", "Status", "Edited"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -88,9 +88,7 @@ class ViewReadingsTab(QWidget):
                          f"{r.get('current_reading',0):.2f}" if r.get('current_reading') is not None else "Skipped", f"{r.get('consumption',0):.2f}",
                          self.utils.format_currency(bb.get("total_amount", 0)), r.get("status"), "Yes" if r.get("edited_by_admin") else "No"]
                 for i, v in enumerate(items):
-                    item = QTableWidgetItem(str(v))
-                    item.setData(Qt.UserRole, r["reading_id"])
-                    self.table.setItem(row, i, item)
+                    item = QTableWidgetItem(str(v)); item.setData(Qt.UserRole, r["reading_id"]); self.table.setItem(row, i, item)
         self.utils.run_in_thread(fetch, callback=done)
 
     def on_row_double(self, index):
@@ -110,10 +108,24 @@ class ViewReadingsTab(QWidget):
             wb.save(path)
         self.utils.run_in_thread(run, callback=lambda _: QMessageBox.information(self, "Done", "Export finished."))
 
+    def do_import(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Excel", "", "Excel Files (*.xlsx)")
+        if not path: return
+        def run():
+            ws = openpyxl.load_workbook(path, data_only=True).active; rows = list(ws.iter_rows(values_only=True)); headers = [str(h).strip() for h in rows[0]]
+            updates = []
+            for r in rows[1:]:
+                if not any(r): continue
+                d = {headers[i]: r[i] for i in range(len(headers)) if i < len(r)}
+                if d.get("reading_id") and d.get("current_reading") is not None:
+                    updates.append({"reading_id": d["reading_id"], "current_reading": float(d["current_reading"]), "notes": d.get("notes", "Bulk update")})
+            return self.fc.bulk_update_readings(updates, self.admin_ctx["name"])
+        self.utils.run_in_thread(run, callback=lambda res: [QMessageBox.information(self, "Done", f"Updated {res['success']} rows."), self.perform_search()])
+
 class ReadingDetailDialog(QDialog):
     def __init__(self, parent, rid, fc, utils, be, admin_ctx, refresh_cb):
         super().__init__(parent); self.rid = rid; self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx; self.refresh_cb = refresh_cb
-        self.setWindowTitle(f"Reading Detail — {rid}"); self.resize(600, 500); self.setup_ui()
+        self.setWindowTitle(f"Reading Detail — {rid}"); self.resize(700, 600); self.setup_ui()
 
     def setup_ui(self):
         self.lay = QVBoxLayout(self); self.info = QLabel("Loading..."); self.lay.addWidget(self.info)
@@ -123,10 +135,18 @@ class ReadingDetailDialog(QDialog):
         def done(res):
             r, c = res; self.r = r; self.c = c
             if not r: return self.info.setText("Not found.")
-            self.info.setText(f"<b>CIN:</b> {r['cin_no']} | <b>Name:</b> {c['name'] if c else 'N/A'}")
-            self.lay.addWidget(QLabel(f"Reader: {r.get('reader_name')} | Status: {r.get('status')}"))
+            self.info.setText(f"<b>CIN:</b> {r['cin_no']} | <b>Name:</b> {c['name'] if c else 'N/A'} | <b>Reader:</b> {r.get('reader_name')}")
+            grid = QGroupBox("Reading Info"); glay = QFormLayout(grid)
+            glay.addRow("Status:", QLabel(r.get("status"))); glay.addRow("Prev Reading:", QLabel(f"{r.get('previous_reading',0):.2f} KL"))
+            glay.addRow("Curr Reading:", QLabel(f"{r.get('current_reading',0):.2f} KL" if r.get('current_reading') is not None else "Skipped"))
+            glay.addRow("Consumption:", QLabel(f"{r.get('consumption',0):.2f} KL")); self.lay.addWidget(grid)
+
             bb = r.get("full_bill_breakdown", {})
-            t = QTextEdit(); t.setReadOnly(True); t.setPlainText(str(bb)); self.lay.addWidget(t)
+            if bb:
+                box = QGroupBox("Bill Breakdown"); blay = QVBoxLayout(box); t = QTextEdit(); t.setReadOnly(True); t.setFont("Courier New")
+                txt = f"Water: {self.utils.format_currency(bb.get('water_charge'))}\nFixed: {self.utils.format_currency(bb.get('fixed_charge'))}\nSewer: {self.utils.format_currency(bb.get('sewerage_tax'))}\nSTP:   {self.utils.format_currency(bb.get('stp_charge'))}\nIDS:   {self.utils.format_currency(bb.get('ids_charge'))}\nTotal: {self.utils.format_currency(bb.get('total_amount'))}"
+                t.setPlainText(txt); blay.addWidget(t); self.lay.addWidget(box)
+
             if r.get("status") == "finalized":
                 btn = QPushButton("🛠️ Admin Override Edit"); btn.clicked.connect(self.open_override); self.lay.addWidget(btn)
         self.utils.run_in_thread(fetch, callback=done)
@@ -138,40 +158,40 @@ class ReadingDetailDialog(QDialog):
 class AdminOverrideDialog(QDialog):
     def __init__(self, parent, r, c, fc, utils, be, admin_ctx):
         super().__init__(parent); self.r = r; self.c = c; self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx
-        self.setWindowTitle("Admin Override"); self.resize(800, 400); self.setup_ui()
+        self.setWindowTitle("Admin Override"); self.resize(800, 500); self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         h = QHBoxLayout(); layout.addLayout(h)
-        self.old_table = QTableWidget(5, 2); self.new_table = QTableWidget(5, 2)
-        h.addWidget(self.old_table); h.addWidget(self.new_table)
+        self.old_table = QTableWidget(6, 2); self.new_table = QTableWidget(6, 2)
+        for t in [self.old_table, self.new_table]: t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); t.setHorizontalHeaderLabels(["Item", "Value"])
+        h.addWidget(QGroupBox("Original Bill", layout=QVBoxLayout())) # fixed below
+        h.itemAt(0).widget().layout().addWidget(self.old_table)
+        h.addWidget(QGroupBox("New Simulated Bill", layout=QVBoxLayout()))
+        h.itemAt(1).widget().layout().addWidget(self.new_table)
         
         self.f_new = QLineEdit(str(self.r["current_reading"])); self.f_new.textChanged.connect(self.simulate)
-        self.f_note = QTextEdit(); self.f_note.setPlaceholderText("Reason note..."); layout.addWidget(QLabel("New Reading:")); layout.addWidget(self.f_new); layout.addWidget(self.f_note)
-        
-        btn = QPushButton("Apply Override"); btn.clicked.connect(self.save); layout.addWidget(btn)
+        self.f_note = QTextEdit(); self.f_note.setPlaceholderText("Required reason..."); layout.addWidget(QLabel("New Current Reading:")); layout.addWidget(self.f_new); layout.addWidget(QLabel("Reason:")); layout.addWidget(self.f_note)
+        btn = QPushButton("✅ Apply Override"); btn.clicked.connect(self.save); layout.addWidget(btn)
         self.simulate()
 
     def simulate(self):
         try:
             curr = float(self.f_new.text()); prev = float(self.r["previous_reading"]); cons = curr - prev
             if cons < 0: return
-            rates = self.fc.get_charges_config()
-            res = self.be.calculate_bill(cons, self.c, rates)
-            self.new_res = res
-            self.fill_sim(self.old_table, self.r.get("full_bill_breakdown", {}))
-            self.fill_sim(self.new_table, res)
+            rates = self.fc.get_charges_config(); cycle = self.fc.get_billing_cycle(self.r["cycle_id"])
+            lp = self.utils.parse_date(cycle["last_payment_date"]) if cycle else None
+            res = self.be.calculate_bill(cons, self.c, rates, previous_outstanding=float(self.c["outstanding_balance"])-self.r["full_bill_breakdown"]["total_amount"], credit_balance=float(self.c["credit_balance"]), last_payment_date=lp, payment_date=date.today())
+            self.fill_sim(self.old_table, self.r.get("full_bill_breakdown", {})); self.fill_sim(self.new_table, res)
         except: pass
 
     def fill_sim(self, t, bb):
-        items = [("Usage", f"{bb.get('consumption',0):.2f}"), ("Water", str(bb.get("water_charge",0))), ("Total", str(bb.get("total_amount",0)))]
-        t.setRowCount(len(items))
-        for i, (k, v) in enumerate(items):
-            t.setItem(i, 0, QTableWidgetItem(k)); t.setItem(i, 1, QTableWidgetItem(v))
+        items = [("Usage", f"{bb.get('consumption',0):.2f} KL"), ("Water", self.utils.format_currency(bb.get("water_charge",0))), ("Sewer", self.utils.format_currency(bb.get("sewerage_tax",0))), ("STP", self.utils.format_currency(bb.get("stp_charge",0))), ("IDS", self.utils.format_currency(bb.get("ids_charge",0))), ("TOTAL", self.utils.format_currency(bb.get("total_amount",0)))]
+        for i, (k, v) in enumerate(items): t.setItem(i, 0, QTableWidgetItem(k)); t.setItem(i, 1, QTableWidgetItem(v))
 
     def save(self):
         note = self.f_note.toPlainText().strip()
-        if not note: return QMessageBox.warning(self, "Error", "Note required.")
+        if not note or not self.f_new.text(): return QMessageBox.warning(self, "Error", "Fill all fields.")
         def run(): self.fc.admin_update_reading(self.r["reading_id"], {"current_reading": float(self.f_new.text()), "notes": f"Admin: {note}"}, self.admin_ctx["name"])
         self.utils.run_in_thread(run, callback=lambda _: self.accept())
 
@@ -182,7 +202,8 @@ class PendingQueriesTab(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, 7); self.table.setHorizontalHeaderLabels(["Date", "CIN", "Name", "Reader", "Submitted", "Requested", "Reason"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.table.doubleClicked.connect(self.on_row_double); layout.addWidget(self.table)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.doubleClicked.connect(self.on_row_double); layout.addWidget(self.table)
         self.refresh_pending()
 
     def refresh_pending(self):
@@ -191,32 +212,36 @@ class PendingQueriesTab(QWidget):
             self.table.setRowCount(0); self.qs = qs
             idx = self.parent().parent().tabs.indexOf(self)
             self.parent().parent().tabs.setTabText(idx, f"⚠️ Pending ({len(qs)})")
+            self.parent().parent().tabs.tabBar().setTabTextColor(idx, Qt.red if qs else Qt.black)
             for q in qs:
                 row = self.table.rowCount(); self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(self.utils.format_date(q.get("created_at"))))
-                self.table.setItem(row, 1, QTableWidgetItem(q["cin_no"]))
-                self.table.setItem(row, 2, QTableWidgetItem(q.get("consumer_info_snapshot", {}).get("name", "")))
-                # ...
+                snap = q.get("consumer_info_snapshot", {})
+                for i, v in enumerate([self.utils.format_date(q.get("created_at")), q["cin_no"], snap.get("name",""), q.get("reader_name",""), f"{q.get('submitted_reading',0):.2f}", f"{q.get('requested_corrected_reading',0):.2f}", q.get("reason","")]):
+                    self.table.setItem(row, i, QTableWidgetItem(str(v)))
         self.utils.run_in_thread(fetch, callback=done)
 
     def on_row_double(self, index):
         q = self.qs[index.row()]
-        dlg = QDialog(self); dlg.setWindowTitle("Review Query"); lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel(f"Query for {q['cin_no']} by {q['reader_name']}")); note = QTextEdit(); lay.addWidget(QLabel("Rejection Note:")); lay.addWidget(note)
-        h = QHBoxLayout(); app_b = QPushButton("Approve"); rej_b = QPushButton("Reject"); h.addWidget(app_b); h.addWidget(rej_b); lay.addLayout(h)
+        dlg = QDialog(self); dlg.setWindowTitle("Review Query"); dlg.resize(500, 400); lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"<b>Query for {q['cin_no']}</b> by {q.get('reader_name')}"))
+        lay.addWidget(QLabel(f"Prev: {q.get('previous_reading'):.2f} | Sub: {q.get('submitted_reading'):.2f} | Req: {q.get('requested_corrected_reading'):.2f}"))
+        lay.addWidget(QLabel(f"Reason: {q.get('reason')}")); note = QTextEdit(); note.setPlaceholderText("Rejection note (required for reject)"); lay.addWidget(note)
+        h = QHBoxLayout(); app_b = QPushButton("✅ Approve"); rej_b = QPushButton("❌ Reject"); h.addWidget(app_b); h.addWidget(rej_b); lay.addLayout(h)
         app_b.clicked.connect(lambda: self.utils.run_in_thread(lambda: self.fc.approve_correction_query(q["query_id"], self.admin_ctx["name"]), callback=lambda _: [dlg.accept(), self.refresh_pending()]))
-        rej_b.clicked.connect(lambda: self.utils.run_in_thread(lambda: self.fc.reject_correction_query(q["query_id"], note.toPlainText(), self.admin_ctx["name"]), callback=lambda _: [dlg.accept(), self.refresh_pending()]))
+        rej_b.clicked.connect(lambda: [self.utils.run_in_thread(lambda: self.fc.reject_correction_query(q["query_id"], note.toPlainText(), self.admin_ctx["name"]), callback=lambda _: [dlg.accept(), self.refresh_pending()]) if note.toPlainText().strip() else QMessageBox.warning(dlg, "Error", "Note required.")])
         dlg.exec()
 
 class AllQueriesLogTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
-        super().__init__(parent); self.fc = fc; self.utils = utils; self.setup_ui()
+        super().__init__(parent); self.fc = fc; self.utils = utils; self.be = be; self.admin_ctx = admin_ctx; self.setup_ui()
     def setup_ui(self):
-        layout = QVBoxLayout(self); self.table = QTableWidget(0, 7); layout.addWidget(self.table)
+        layout = QVBoxLayout(self); self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(["Created", "CIN", "Reader", "Submitted", "Requested", "Status", "Resolved"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); layout.addWidget(self.table)
         self.utils.run_in_thread(self.fc.get_all_correction_queries, callback=self.done)
     def done(self, qs):
         self.table.setRowCount(0)
         for q in qs:
             row = self.table.rowCount(); self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(self.utils.format_date(q.get("created_at"))))
-            # ...
+            for i, v in enumerate([self.utils.format_date(q.get("created_at")), q["cin_no"], q.get("reader_name",""), f"{q.get('submitted_reading',0):.2f}", f"{q.get('requested_corrected_reading',0):.2f}", q.get("status",""), self.utils.format_date(q.get("resolved_at"))]):
+                self.table.setItem(row, i, QTableWidgetItem(str(v)))

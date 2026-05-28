@@ -84,6 +84,9 @@ class BillingSummaryTab(QWidget):
             m, zd = res; self.kpi_lbl.setText(f"Billed: {self.utils.format_currency(m['total_billed'])} | Collected: {self.utils.format_currency(m['total_collected'])} | Deficit: {self.utils.format_currency(m['total_outstanding'])}")
             self.fig.clear(); ax = self.fig.add_subplot(111); zones = [str(z["zone"]) for z in zd]; billed = [z["billed_amount"] for z in zd]; coll = [z["collected_amount"] for z in zd]
             x = np.arange(len(zones)); w = 0.35; ax.bar(x - w/2, billed, w, label="Billed", color="#1e3a5f"); ax.bar(x + w/2, coll, w, label="Collected", color="#E8913A")
+            ax.set_facecolor("none")
+            ax.tick_params(colors="#1e3a5f") # Set to dark blue to match text on white-ish cards
+            for s in ax.spines.values(): s.set_color("#334155")
             ax.set_xticks(x); ax.set_xticklabels(zones); ax.legend(); self.fig.tight_layout(); self.canvas.draw()
         self.utils.run_in_thread(fetch, callback=done)
 
