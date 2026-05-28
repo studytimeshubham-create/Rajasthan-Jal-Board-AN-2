@@ -167,6 +167,8 @@ class Worker(QRunnable):
         except Exception:
             self.signals.error.emit(traceback.format_exc())
 
+_workers = set()
+
 def run_in_thread(fn, *args, callback=None, error_callback=None, **kwargs) -> Worker:
     """
     Runs fn(*args, **kwargs) on a background thread from Qt's global thread pool.
@@ -178,8 +180,17 @@ def run_in_thread(fn, *args, callback=None, error_callback=None, **kwargs) -> Wo
     thread-safe and deliver to the main thread automatically.
     """
     worker = Worker(fn, *args, **kwargs)
+    _workers.add(worker)
+
+    def cleanup(*_):
+        _workers.discard(worker)
+
     if callback:
         worker.signals.result.connect(callback)
+
+    worker.signals.result.connect(cleanup)
+    worker.signals.error.connect(cleanup)
+
     worker.signals.error.connect(
         error_callback if error_callback
         else lambda tb: print("Background thread error:\n" + tb)

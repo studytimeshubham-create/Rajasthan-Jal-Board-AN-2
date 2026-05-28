@@ -163,12 +163,15 @@ class AdminOverrideDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         h = QHBoxLayout(); layout.addLayout(h)
+
         self.old_table = QTableWidget(6, 2); self.new_table = QTableWidget(6, 2)
-        for t in [self.old_table, self.new_table]: t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); t.setHorizontalHeaderLabels(["Item", "Value"])
-        h.addWidget(QGroupBox("Original Bill", layout=QVBoxLayout())) # fixed below
-        h.itemAt(0).widget().layout().addWidget(self.old_table)
-        h.addWidget(QGroupBox("New Simulated Bill", layout=QVBoxLayout()))
-        h.itemAt(1).widget().layout().addWidget(self.new_table)
+        for t in [self.old_table, self.new_table]:
+            t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            t.setHorizontalHeaderLabels(["Item", "Value"])
+            t.verticalHeader().setVisible(False)
+
+        g1 = QGroupBox("Original Bill"); l1 = QVBoxLayout(g1); l1.addWidget(self.old_table); h.addWidget(g1)
+        g2 = QGroupBox("New Simulated Bill"); l2 = QVBoxLayout(g2); l2.addWidget(self.new_table); h.addWidget(g2)
         
         self.f_new = QLineEdit(str(self.r["current_reading"])); self.f_new.textChanged.connect(self.simulate)
         self.f_note = QTextEdit(); self.f_note.setPlaceholderText("Required reason..."); layout.addWidget(QLabel("New Current Reading:")); layout.addWidget(self.f_new); layout.addWidget(QLabel("Reason:")); layout.addWidget(self.f_note)
@@ -216,7 +219,16 @@ class PendingQueriesTab(QWidget):
             for q in qs:
                 row = self.table.rowCount(); self.table.insertRow(row)
                 snap = q.get("consumer_info_snapshot", {})
-                for i, v in enumerate([self.utils.format_date(q.get("created_at")), q["cin_no"], snap.get("name",""), q.get("reader_name",""), f"{q.get('submitted_reading',0):.2f}", f"{q.get('requested_corrected_reading',0):.2f}", q.get("reason","")]):
+                items = [
+                    self.utils.format_date(q.get("created_at")),
+                    q["cin_no"],
+                    snap.get("name", "Unknown"),
+                    q.get("reader_name", "Field Reader"),
+                    f"{q.get('submitted_reading', 0.0):.2f}",
+                    f"{q.get('requested_corrected_reading', 0.0):.2f}",
+                    q.get("reason", "")
+                ]
+                for i, v in enumerate(items):
                     self.table.setItem(row, i, QTableWidgetItem(str(v)))
         self.utils.run_in_thread(fetch, callback=done)
 
@@ -243,5 +255,14 @@ class AllQueriesLogTab(QWidget):
         self.table.setRowCount(0)
         for q in qs:
             row = self.table.rowCount(); self.table.insertRow(row)
-            for i, v in enumerate([self.utils.format_date(q.get("created_at")), q["cin_no"], q.get("reader_name",""), f"{q.get('submitted_reading',0):.2f}", f"{q.get('requested_corrected_reading',0):.2f}", q.get("status",""), self.utils.format_date(q.get("resolved_at"))]):
+            items = [
+                self.utils.format_date(q.get("created_at")),
+                q["cin_no"],
+                q.get("reader_name", ""),
+                f"{q.get('submitted_reading', 0.0):.2f}",
+                f"{q.get('requested_corrected_reading', 0.0):.2f}",
+                q.get("status", ""),
+                self.utils.format_date(q.get("resolved_at"))
+            ]
+            for i, v in enumerate(items):
                 self.table.setItem(row, i, QTableWidgetItem(str(v)))

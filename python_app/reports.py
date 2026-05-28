@@ -141,15 +141,23 @@ class LedgerStatementTab(QWidget):
     def __init__(self, parent, fc, utils, be, admin_ctx):
         super().__init__(parent); self.fc = fc; self.utils = utils; self.setup_ui()
     def setup_ui(self):
-        layout = QVBoxLayout(self); self.f_cin = QLineEdit(); layout.addWidget(QLabel("CIN:")); layout.addWidget(self.f_cin)
-        btn = QPushButton("🖨️ Export PDF Ledger"); btn.clicked.connect(self.run); layout.addWidget(btn); layout.addStretch()
+        layout = QVBoxLayout(self); self.f_cin = QLineEdit(); layout.addWidget(QLabel("<b>Export Consumer Ledger Statement (PDF)</b>"))
+        layout.addWidget(QLabel("Enter Consumer CIN Number:")); layout.addWidget(self.f_cin)
+        btn = QPushButton("🖨️ Generate & Open Ledger PDF"); btn.clicked.connect(self.run); layout.addWidget(btn); layout.addStretch()
     def run(self):
         cin = self.f_cin.text().strip()
         if not cin: return
         def run_pdf():
             c = self.fc.get_consumer(cin)
-            if not c: return
-            html = self.utils.load_pdf_template("consumer_ledger").replace("{{cin_no}}", cin).replace("{{name}}", c["name"]) # simplified
+            if not c: return None
+            readings = self.fc.get_readings_for_cycle("", cin); payments = self.fc.get_payments_for_consumer(cin)
+            adjs = self.fc.get_adjustments_for_consumer(cin); reps = self.fc.get_meter_replacement_history(cin)
+
+            html = self.utils.load_pdf_template("consumer_ledger").replace("{{cin_no}}", cin).replace("{{name}}", c["name"])\
+                    .replace("{{outstanding_balance}}", self.utils.format_currency(c.get("outstanding_balance", 0)))\
+                    .replace("{{meter_serial_no}}", c.get("meter_serial_no") or "")\
+                    .replace("{{readings_rows}}", "".join([f"<tr><td>{r.get('reading_date')}</td><td>{r.get('cycle_id')}</td><td>{r.get('consumption')}</td><td>{self.utils.format_currency(r.get('full_bill_breakdown',{}).get('total_amount',0))}</td></tr>" for r in readings]))\
+                    .replace("{{payments_rows}}", "".join([f"<tr><td>{p.get('payment_date')}</td><td>{p.get('receipt_number')}</td><td>{p.get('payment_mode')}</td><td>{self.utils.format_currency(p.get('amount'))}</td></tr>" for p in payments]))
             path = os.path.join(os.getcwd(), f"Ledger_{cin}.pdf")
             with open(path, "wb") as f: f.write(self.utils.render_pdf_to_bytes(html))
             return path
