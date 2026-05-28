@@ -46,6 +46,14 @@ def clear_cache(key: str = None):
 def _where_eq(query, field: str, value):
     return query.where(filter=firestore.FieldFilter(field, "==", value))
 
+def _txn_get(txn, ref):
+    """Robust transaction.get(ref) to handle snapshots or generators."""
+    res = txn.get(ref)
+    try:
+        return next(res)
+    except TypeError:
+        return res
+
 # Helper to serialize values for Firestore
 def serialize_val(val):
     if isinstance(val, (datetime, date)):
@@ -383,7 +391,7 @@ def admin_update_reading(reading_id: str, updates: dict, admin_name: str) -> Non
     
     @firestore.transactional
     def update_in_transaction(txn, read_ref):
-        reading_doc = txn.get(read_ref)
+        reading_doc = _txn_get(txn, read_ref)
         if not reading_doc.exists:
             raise FileNotFoundError(f"Reading {reading_id} not found.")
 
@@ -392,18 +400,18 @@ def admin_update_reading(reading_id: str, updates: dict, admin_name: str) -> Non
         cycle_id = old_reading["cycle_id"]
 
         consumer_ref = db.collection("consumers").document(cin_no)
-        consumer_doc = txn.get(consumer_ref)
+        consumer_doc = _txn_get(txn, consumer_ref)
         if not consumer_doc.exists:
             raise FileNotFoundError(f"Consumer {cin_no} not found.")
         consumer = consumer_doc.to_dict()
         consumer["cin_no"] = cin_no
 
         rates_ref = db.collection("charges_config").document("current")
-        rates_doc = txn.get(rates_ref)
+        rates_doc = _txn_get(txn, rates_ref)
         rates = rates_doc.to_dict() if rates_doc.exists else DEFAULT_CHARGES_CONFIG
 
         cycle_ref = db.collection("billing_cycles").document(cycle_id)
-        cycle_doc = txn.get(cycle_ref)
+        cycle_doc = _txn_get(txn, cycle_ref)
         cycle = cycle_doc.to_dict() if cycle_doc.exists else {}
 
         # Rollback old bill amount from consumer outstanding first
@@ -566,7 +574,7 @@ def record_payment(data: dict, admin_name: str) -> str:
     
     @firestore.transactional
     def execute_payment(txn, consumer_ref, pay_ref):
-        consumer_doc = txn.get(consumer_ref)
+        consumer_doc = _txn_get(txn, consumer_ref)
         if not consumer_doc.exists:
             raise FileNotFoundError(f"Consumer {cin_no} not found.")
         consumer = consumer_doc.to_dict()
@@ -693,7 +701,7 @@ def update_consumer_lps_waiver(cin_no: str, waiver_amount: float, reason_note: s
     
     @firestore.transactional
     def apply_waiver(txn, cons_ref, adjustment_ref):
-        consumer_doc = txn.get(cons_ref)
+        consumer_doc = _txn_get(txn, cons_ref)
         if not consumer_doc.exists:
             raise FileNotFoundError(f"Consumer {cin_no} not found.")
         consumer = consumer_doc.to_dict()
@@ -1033,7 +1041,7 @@ def add_custom_adjustment(cin_no: str, adj_type: str, amount: float, reason_note
     
     @firestore.transactional
     def apply_adjustment(txn, cons_ref, adjustment_ref):
-        consumer_doc = txn.get(cons_ref)
+        consumer_doc = _txn_get(txn, cons_ref)
         if not consumer_doc.exists:
             raise FileNotFoundError(f"Consumer {cin_no} not found.")
         consumer = consumer_doc.to_dict()
@@ -1103,7 +1111,7 @@ def record_meter_replacement(cin_no: str, old_serial: str, new_serial: str, repl
     
     @firestore.transactional
     def replace_meter(txn, cons_ref, l_ref):
-        consumer_doc = txn.get(cons_ref)
+        consumer_doc = _txn_get(txn, cons_ref)
         if not consumer_doc.exists:
             raise FileNotFoundError(f"Consumer {cin_no} not found.")
 
